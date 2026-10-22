@@ -34,8 +34,8 @@ def cmd_qualify(con, args):
 
 
 def contact(con, row, subject, body, mode, followup=False):
-    msg = mailer.build_message(row["email"], subject, body)
-    mailer.deliver(msg, mode)
+    if mode != "review":  # en mode review, l'envoi se fait depuis le dashboard
+        mailer.deliver(mailer.build_message(row["email"], subject, body), mode)
     ts = db.now()
     if followup:
         con.execute("UPDATE companies SET status='followed_up', followup_at=? WHERE siren=?", (ts, row["siren"]))
@@ -48,8 +48,8 @@ def contact(con, row, subject, body, mode, followup=False):
 
 
 def cmd_run(con, args):
-    mode, limit = config.env("SEND_MODE", "draft"), int(config.env("DAILY_LIMIT", "10"))
-    if not config.env("GMAIL_APP_PASSWORD"):
+    mode, limit = db.send_mode(con), int(config.env("DAILY_LIMIT", "10"))
+    if mode != "review" and not config.env("GMAIL_APP_PASSWORD"):
         sys.exit("GMAIL_APP_PASSWORD manquant dans .env")
     done = 0
     # 1. relances à J+7 (comptent dans le quota quotidien)

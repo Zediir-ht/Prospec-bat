@@ -16,6 +16,7 @@ CREATE TABLE IF NOT EXISTS companies (
     contacted_at TEXT, followup_at TEXT,
     created_at TEXT DEFAULT CURRENT_TIMESTAMP
 );
+CREATE TABLE IF NOT EXISTS settings (key TEXT PRIMARY KEY, value TEXT);
 CREATE TABLE IF NOT EXISTS suppression (email TEXT PRIMARY KEY, added_at TEXT DEFAULT CURRENT_TIMESTAMP);
 """
 
@@ -55,3 +56,19 @@ def due_followups(con, days):
         "SELECT * FROM companies WHERE status='sent' AND contacted_at <= ? AND followup_at IS NULL",
         (limit,),
     ).fetchall()
+
+
+def get_setting(con, key, default=""):
+    row = con.execute("SELECT value FROM settings WHERE key=?", (key,)).fetchone()
+    return row["value"] if row else default
+
+
+def set_setting(con, key, value):
+    con.execute("INSERT INTO settings(key,value) VALUES(?,?) ON CONFLICT(key) DO UPDATE SET value=excluded.value", (key, value))
+    con.commit()
+
+
+def send_mode(con):
+    """review (valider dans le dashboard) | draft (brouillons Gmail) | send (envoi direct)"""
+    from .config import env
+    return get_setting(con, "send_mode", env("SEND_MODE", "review"))

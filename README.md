@@ -42,3 +42,8 @@ Il faut un disque persistant (`/app/data` contient la base SQLite) : un petit VP
 Passer en HTTPS (Caddy ou le certificat du fournisseur) puisque l'on saisit un mot de passe.
 
 Déclenchement quotidien : créer un job gratuit sur cron-job.org qui appelle `https://VOTRE-URL/cron/<CRON_TOKEN>` chaque matin en semaine.
+
+### Lancement rapide (Termux / Linux)
+```bash
+./start.sh   # puis ouvrir http://localhost:8000
+```

@@ -47,3 +47,11 @@ Déclenchement quotidien : créer un job gratuit sur cron-job.org qui appelle `h
 ```bash
 ./start.sh   # puis ouvrir http://localhost:8000
 ```
+
+### Installation en une commande (Termux / Android)
+```bash
+pkg install -y git
+git clone -b claude/prospection-batiment-aveyron-zojkz0 https://github.com/zediir-ht/prospec-bat.git
+cd prospec-bat && ./install.sh
+```
+Le script installe les dépendances, pose 3 questions (mot de passe d'application Gmail, mentions légales, téléphone), génère les secrets, puis lance le dashboard sur http://localhost:8000.

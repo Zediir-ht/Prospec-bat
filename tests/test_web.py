@@ -58,3 +58,18 @@ def test_cron_token(client, monkeypatch):
     monkeypatch.setattr(web, "start_job", lambda: True)
     assert client.get("/cron/bad").status_code == 404
     assert client.get("/cron/tok").json == {"started": True}
+
+
+def test_write_tab_and_import(client):
+    con = db.connect()
+    con.execute("INSERT INTO companies(siren,nom,commune,code_postal,metier,email,status,site_status) "
+                "VALUES('2','MARTIN','Millau','12100','boulangerie','m@martin-pain.fr','qualified','none')")
+    con.commit()
+    login(client)
+    page = client.get("/?tab=write").data
+    assert b"MARTIN" in page and b"Copier la demande" in page
+    reply = ('[{"siren": "2", "subject": "Un site pour Martin ?", "body": "Bonjour,\\n\\nEn cherchant boulangerie Millau, '
+             'je n\'ai pas trouv\u00e9 votre site. Je peux pr\u00e9parer une maquette gratuite, sans engagement. Cela vous int\u00e9resse ?"}]')
+    r = client.post("/import", data={"text": reply})
+    assert r.status_code == 302
+    assert b"Un site pour Martin" in client.get("/?tab=drafts").data

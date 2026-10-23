@@ -48,6 +48,15 @@ def contact(con, row, subject, body, mode, followup=False):
     con.commit()
 
 
+def next_to_write(con):
+    """Entreprises qualifiées, Aveyron d'abord, puis celles sans site ; exclut les désinscrits."""
+    rows = con.execute(
+        "SELECT * FROM companies WHERE status='qualified' "
+        "ORDER BY (code_postal LIKE '12%') DESC, (site_status='none') DESC, siren"
+    ).fetchall()
+    return [r for r in rows if not db.is_suppressed(con, r["email"])]
+
+
 def cmd_run(con, args):
     mode, limit = db.send_mode(con), int(config.env("DAILY_LIMIT", "10"))
     if mode != "review" and not config.env("GMAIL_APP_PASSWORD"):
@@ -65,17 +74,18 @@ def cmd_run(con, args):
             print(f"relance -> {row['nom']}")
             done += 1
             time.sleep(random.uniform(60, 240))
-    # 2. nouveaux contacts : les entreprises sans site d'abord
-    rows = con.execute(
-        "SELECT * FROM companies WHERE status='qualified' ORDER BY (code_postal LIKE '12%') DESC, (site_status='none') DESC, RANDOM()"
-    ).fetchall()
-    for row in rows:
+    # 2. nouveaux contacts : mails rédigés par Claude (API). Sans clé API, la rédaction se fait
+    #    depuis l'onglet « À rédiger » du dashboard.
+    if not config.env("ANTHROPIC_API_KEY"):
+        print("Pas de clé API : rédigez les mails depuis l'onglet « À rédiger » du dashboard.")
+        return
+    for row in next_to_write(con):
         if done >= limit:
             break
-        if db.is_suppressed(con, row["email"]):
-            con.execute("UPDATE companies SET status='refused' WHERE siren=?", (row["siren"],))
+        mail = mailer.compose(dict(row))
+        if not mail:
             continue
-        subject, body = mailer.compose(dict(row))
+        subject, body = mail
         contact(con, row, subject, body, mode)
         print(f"{mode} -> {row['nom']} <{row['email']}> : {subject}")
         done += 1

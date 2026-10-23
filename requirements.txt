@@ -1,5 +1,4 @@
 requests>=2.31
-anthropic>=0.40
 flask>=3.0
 gunicorn>=22
 pytest>=8

@@ -29,13 +29,33 @@ def test_emails():
     assert qualify.extract_emails(html) == ["info@dupont.fr"]
 
 
-def test_mail_has_no_price_and_has_optout():
-    c = {"nom": "DUPONT", "commune": "Rodez", "metier": "plomberie", "dirigeant": "Jean Dupont",
-         "site_status": "none", "site_issues": ""}
-    subject, body = mailer.fallback_mail(c)
-    msg = mailer.build_message("a@b.fr", subject, body)
+def test_signature_has_optout_and_no_price():
+    msg = mailer.build_message("a@b.fr", "Un site ?", "Bonjour,\n\nJe peux préparer une maquette gratuite de votre site, sans engagement.")
     text = msg.get_content()
-    assert "€" not in text and "maquette gratuite" in text and "STOP" in text and msg["List-Unsubscribe"]
+    assert "STOP" in text and msg["List-Unsubscribe"] and "€" not in text
+
+
+def test_check_mail_rejects_price():
+    import pytest
+    with pytest.raises(ValueError):
+        mailer.check_mail("Un site ?", "Bonjour, votre site pour seulement 500 € avec une maquette gratuite et sans engagement du tout.")
+    with pytest.raises(ValueError):
+        mailer.check_mail("", "court")
+
+
+def test_batch_prompt_and_parse():
+    c = {"siren": "1", "nom": "DUPONT", "commune": "Rodez", "metier": "boulangerie", "dirigeant": "Jean Dupont",
+         "site_status": "none", "site_issues": ""}
+    prompt = mailer.batch_prompt([c])
+    assert "DUPONT" in prompt and "JSON" in prompt and "aucun prix" in prompt.lower()
+    reply = """Voici :
+```json
+[{"siren": "1", "subject": "Un site pour Dupont ?", "body": "Bonjour Jean,\\n\\nEn cherchant boulangerie Rodez, je n'ai pas trouvé votre site. Je peux préparer une maquette gratuite, sans engagement. Cela vous intéresse ?"},
+ {"siren": "9", "subject": "x", "body": "y"}]
+```"""
+    ok, errors = mailer.parse_batch(reply, {"1": "DUPONT"})
+    assert list(ok) == ["1"] and ok["1"][0] == "Un site pour Dupont ?" and len(errors) == 1
+    assert mailer.parse_batch("pas de json", {"1": "X"})[0] == {}
 
 
 def test_suppression(tmp_path):
@@ -67,3 +87,26 @@ def test_source_is_incremental_and_aveyron_first(tmp_path, monkeypatch):
     assert calls == [("12", "10.71C"), ("12", "56.10A"), ("48", "10.71C")]
     assert sourcing.source(con, max_other=1) == 1 and calls[-1] == ("48", "56.10A")
     assert sourcing.source(con) == 0
+
+
+def test_claude_mail_via_http(monkeypatch):
+    from prospec import config
+
+    monkeypatch.setenv("ANTHROPIC_API_KEY", "k")
+    sent = {}
+
+    class R:
+        def raise_for_status(self): pass
+        def json(self):
+            return {"content": [{"text": "Un site pour Dupont ?\n\nBonjour Jean,\n\nEn cherchant boulangerie Rodez, je n'ai pas trouvé votre site. "
+                                          "Je peux préparer une maquette gratuite, sans engagement. Cela vous intéresse ?"}]}
+
+    import requests
+    monkeypatch.setattr(requests, "post", lambda url, **kw: sent.update(kw) or R())
+    c = {"siren": "1", "nom": "DUPONT", "commune": "Rodez", "metier": "boulangerie", "dirigeant": "Jean",
+         "site_status": "none", "site_issues": ""}
+    subject, body = mailer.compose(c)
+    assert subject == "Un site pour Dupont ?" and body.startswith("Bonjour Jean")
+    assert sent["headers"]["x-api-key"] == "k" and "DUPONT" in sent["json"]["messages"][0]["content"]
+    monkeypatch.delenv("ANTHROPIC_API_KEY")
+    assert mailer.compose(c) is None

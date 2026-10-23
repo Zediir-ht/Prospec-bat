@@ -59,3 +59,9 @@ Le script installe les dépendances, pose 3 questions (mot de passe d'applicatio
 - `DEPARTEMENTS` : par défaut `12,48,15,46,81,82` (Aveyron en priorité). Ajouter `30`, `34` pour élargir.
 - `SECTEURS` : par défaut `batiment,alimentaire,restauration,artisanat,services,commerce`.
 Les entreprises sont récupérées progressivement : l'Aveyron en entier au premier lancement, puis quelques départements voisins à chaque « Préparer les mails du jour ».
+
+## Rédaction des mails par Claude
+Chaque mail est écrit par Claude pour l'entreprise visée (activité, commune, constat sur son site). Il n'y a pas de modèle fixe.
+- **Avec une clé API** (`ANTHROPIC_API_KEY`) : « Préparer les mails du jour » écrit les mails tout seul.
+- **Sans clé** : onglet **À rédiger** → *Copier la demande* → coller dans Claude (claude.ai) → coller sa réponse JSON → *Importer*. Les mails arrivent dans **À valider**.
+Tout mail mentionnant un prix est refusé automatiquement.

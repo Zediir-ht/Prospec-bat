@@ -1,5 +1,7 @@
-"""Rédaction des mails (Claude ou modèle fixe) et dépôt en brouillon / envoi via Gmail."""
+"""Rédaction des mails par Claude (API ou collage manuel) et dépôt en brouillon / envoi via Gmail."""
 import imaplib
+import json
+import re
 import smtplib
 import time
 from email.message import EmailMessage
@@ -24,23 +26,9 @@ Règles strictes :
 - Propose de préparer une maquette gratuite de leur site, sans engagement, et demande si ça les intéresse.
 - N'indique AUCUN prix, tarif ou montant.
 - Ne mets ni signature ni formule de désinscription : elles sont ajoutées automatiquement.
-Réponds en deux parties séparées par une ligne vide : la première ligne est l'objet du mail (court, sans majuscules abusives), puis le corps."""
+Les informations sur l'entreprise sont fournies en JSON."""
 
-
-def fallback_mail(c):
-    salut = f"Bonjour {c['dirigeant'].split()[0]}," if c.get("dirigeant") else "Bonjour,"
-    if c["site_status"] == "none":
-        constat = f"En cherchant « {c['metier']} {c['commune']} » sur internet, je n'ai pas trouvé de site pour {c['nom']}."
-    else:
-        constat = f"En regardant le site de {c['nom']}, j'ai remarqué que {c['site_issues'].split(';')[0].strip()}."
-    body = (
-        f"{salut}\n\n{constat} Aujourd'hui, la plupart des particuliers de {c['commune']} et des environs "
-        f"cherchent d'abord sur leur téléphone avant de se déplacer ou d'appeler.\n\n"
-        f"Je crée des sites web pour les artisans, commerçants et entreprises de l'Aveyron. "
-        f"Je peux vous préparer une maquette gratuite de votre site, sans engagement, pour que vous voyiez le résultat concrètement.\n\n"
-        f"Est-ce que cela vous intéresserait ?"
-    )
-    return f"Un site pour {c['nom']} ?", body
+FORMAT_SINGLE = "\nRéponds en deux parties séparées par un saut de ligne : la première ligne est l'objet du mail (court, sans majuscules abusives), puis le corps."
 
 
 def followup_mail(c):
@@ -53,28 +41,86 @@ def followup_mail(c):
     return f"Re : Un site pour {c['nom']} ?", body
 
 
-def claude_mail(c):
-    import anthropic
-
-    client = anthropic.Anthropic()
+def describe(c):
     angle = ANGLES.get(c["site_status"], "").format(issues=c.get("site_issues", ""))
-    user = (
-        f"Entreprise : {c['nom']}\nCommune : {c['commune']}\nMétier : {c['metier']}\n"
-        f"Dirigeant : {c.get('dirigeant') or 'inconnu'}\nConstat : {angle}"
+    return {
+        "siren": c["siren"], "entreprise": c["nom"], "commune": c["commune"], "activite": c["metier"],
+        "dirigeant": c.get("dirigeant") or "inconnu", "constat": angle,
+    }
+
+
+def claude_mail(c):
+    """Rédige un mail via l'API Claude (nécessite ANTHROPIC_API_KEY). Retourne (objet, corps)."""
+    import requests
+
+    resp = requests.post(
+        "https://api.anthropic.com/v1/messages",
+        headers={"x-api-key": config.env("ANTHROPIC_API_KEY"), "anthropic-version": "2023-06-01"},
+        json={"model": MODEL, "max_tokens": 600, "system": SYSTEM + FORMAT_SINGLE,
+              "messages": [{"role": "user", "content": json.dumps(describe(c), ensure_ascii=False)}]},
+        timeout=60,
     )
-    msg = client.messages.create(model=MODEL, max_tokens=600, system=SYSTEM, messages=[{"role": "user", "content": user}])
-    text = msg.content[0].text.strip()
-    subject, _, body = text.partition("\n")
-    return subject.strip().strip('"'), body.strip()
+    resp.raise_for_status()
+    subject, _, body = resp.json()["content"][0]["text"].strip().partition("\n")
+    return check_mail(subject.strip().strip('"'), body.strip())
+
+
+FORBIDDEN = ("€", "euro", "tarif", "prix", "devis gratuit à partir")
+
+
+def check_mail(subject, body):
+    text = f"{subject}\n{body}".lower()
+    if not subject or len(body) < 80:
+        raise ValueError("mail vide ou trop court")
+    if any(w in text for w in FORBIDDEN):
+        raise ValueError("le mail mentionne un prix")
+    return subject, body
 
 
 def compose(c):
-    if config.env("ANTHROPIC_API_KEY"):
+    """Mail rédigé par Claude pour cette entreprise, ou None si la rédaction automatique est indisponible."""
+    if not config.env("ANTHROPIC_API_KEY"):
+        return None
+    try:
+        return claude_mail(c)
+    except Exception as exc:
+        print(f"  ! rédaction impossible pour {c['nom']} ({exc}), mail non préparé")
+        return None
+
+
+def batch_prompt(companies):
+    """Demande à coller dans Claude (claude.ai) pour rédiger plusieurs mails d'un coup."""
+    data = json.dumps([describe(c) for c in companies], ensure_ascii=False, indent=1)
+    return (
+        SYSTEM
+        + "\n\nTu reçois ci-dessous une liste d'entreprises. Rédige un mail DIFFÉRENT et personnalisé pour chacune."
+        + " Réponds uniquement avec un tableau JSON, sans aucun autre texte, de la forme :"
+        + ' [{"siren": "...", "subject": "objet", "body": "corps du mail"}]'
+        + "\nDans le JSON, l'objet est dans \"subject\" (pas de ligne séparée) et les retours à la ligne du corps s'écrivent \\n."
+        + "\n\nEntreprises :\n" + data
+    )
+
+
+def parse_batch(text, allowed):
+    """Lit la réponse de Claude. Retourne (mails valides {siren: (objet, corps)}, liste d'erreurs)."""
+    m = re.search(r"\[.*\]", text, re.S)
+    if not m:
+        return {}, ["aucun tableau JSON trouvé dans la réponse"]
+    try:
+        items = json.loads(m.group(0))
+    except json.JSONDecodeError as exc:
+        return {}, [f"JSON invalide : {exc}"]
+    ok, errors = {}, []
+    for it in items if isinstance(items, list) else []:
+        siren = str(it.get("siren", "")) if isinstance(it, dict) else ""
+        if siren not in allowed:
+            errors.append(f"entreprise inconnue ou déjà traitée : {siren or '?'}")
+            continue
         try:
-            return claude_mail(c)
-        except Exception as exc:  # repli sur le modèle fixe plutôt que de bloquer la journée
-            print(f"  ! Claude indisponible ({exc}), modèle fixe utilisé")
-    return fallback_mail(c)
+            ok[siren] = check_mail(str(it.get("subject", "")).strip(), str(it.get("body", "")).strip())
+        except ValueError as exc:
+            errors.append(f"{allowed[siren]} : {exc}")
+    return ok, errors
 
 
 def signature():

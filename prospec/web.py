@@ -33,6 +33,7 @@ PAGE = """<!doctype html><html lang="fr"><head><meta charset="utf-8">
 <meta name="viewport" content="width=device-width,initial-scale=1"><meta name="theme-color" content="#1d6feb">
 <link rel="manifest" href="/manifest.json"><title>Prospec Bat</title><style>{{css}}</style></head><body>
 <header><h1>Prospec Bat</h1><span class="mut">{{mode_label}}</span></header>
+{% if msg %}<div class="card">{{msg}}</div>{% endif %}
 {% if session.get('ok') %}<nav>
 {% for k,l in tabs %}<a href="{{url_for('index',tab=k)}}" class="{{'on' if tab==k}}">{{l}}</a>{% endfor %}</nav>{% endif %}
 {{body|safe}}</body></html>"""
@@ -58,19 +59,32 @@ DRAFT = """{% for c in rows %}<div class="card"><b>{{c.nom}}</b> <span class="ta
 <button name="act" value="save" class="btn gh">Enregistrer</button><button name="act" value="skip" class="btn ko">Ignorer</button></div></form></div>
 {% else %}<div class="card mut">Aucun mail en attente. Lancez « Préparer les mails du jour » depuis l'accueil.</div>{% endfor %}"""
 
+WRITE = """{% if auto %}<div class="card"><b>Rédaction automatique active</b><p class="mut">Claude écrit chaque mail via la clé API quand vous appuyez sur « Préparer les mails du jour ».</p></div>
+{% else %}<div class="card"><b>{{n}} entreprises prêtes à recevoir un mail</b>
+<p class="mut">1. Copiez la demande.<br>2. Collez-la dans une conversation avec Claude (claude.ai).<br>3. Collez sa réponse ci-dessous.</p>
+{% if batch %}<div class="row"><button class="btn pri" id="copy" type="button">Copier la demande ({{batch|length}} entreprises)</button></div>
+<textarea id="prompt" readonly hidden>{{prompt}}</textarea><p class="mut" id="copied" hidden>Copié. Collez-la maintenant dans Claude.</p>{% endif %}</div>
+<form class="card" method="post" action="{{url_for('import_mails')}}"><b>Réponse de Claude</b>
+<textarea name="text" placeholder="Collez ici le tableau JSON écrit par Claude" required></textarea>
+<div class="row"><button class="btn ok">Importer les mails</button></div></form>
+<script>document.getElementById("copy")&&document.getElementById("copy").addEventListener("click",function(){var t=document.getElementById("prompt");
+function done(){document.getElementById("copied").hidden=false}
+if(navigator.clipboard&&navigator.clipboard.writeText){navigator.clipboard.writeText(t.value).then(done,function(){t.hidden=false;t.select()})}else{t.hidden=false;t.select();document.execCommand("copy");done()}});</script>{% endif %}"""
+
 SENT = """{% for c in rows %}<div class="card"><b>{{c.nom}}</b> <span class="tag">{{c.status}}</span>
 <div class="mut">{{c.email}} · {{c.contacted_at}}</div>
 <form method="post" action="{{url_for('mark',siren=c.siren)}}"><div class="row">
 <button name="s" value="replied" class="btn ok">A répondu</button><button name="s" value="refused" class="btn ko">Refus</button></div></form></div>
 {% else %}<div class="card mut">Rien d'envoyé pour l'instant.</div>{% endfor %}"""
 
-TABS = [("home", "Accueil"), ("drafts", "À valider"), ("sent", "Envoyés")]
+TABS = [("home", "Accueil"), ("write", "À rédiger"), ("drafts", "À valider"), ("sent", "Envoyés")]
 MODES = [("review", "Review (je valide ici)"), ("draft", "Brouillons Gmail"), ("send", "Envoi direct")]
 
 
 def page(body, tab="home", con=None):
     mode = db.send_mode(con) if con else ""
-    return render_template_string(PAGE, css=CSS, body=body, tab=tab, tabs=TABS, mode_label=dict(MODES).get(mode, ""))
+    return render_template_string(PAGE, css=CSS, body=body, tab=tab, tabs=TABS, mode_label=dict(MODES).get(mode, ""),
+                                  msg=session.pop("msg", ""))
 
 
 def connect():
@@ -117,6 +131,11 @@ def index():
     if tab == "drafts":
         rows = con.execute("SELECT * FROM companies WHERE status='drafted' ORDER BY contacted_at").fetchall()
         body = render_template_string(DRAFT, rows=rows)
+    elif tab == "write":
+        batch = cli.next_to_write(con)[: int(config.env("DAILY_LIMIT", "10"))]
+        body = render_template_string(
+            WRITE, auto=bool(config.env("ANTHROPIC_API_KEY")), n=len(cli.next_to_write(con)), batch=batch,
+            prompt=mailer.batch_prompt([dict(r) for r in batch]) if batch else "")
     elif tab == "sent":
         rows = con.execute("SELECT * FROM companies WHERE status IN ('sent','followed_up') ORDER BY contacted_at DESC LIMIT 100").fetchall()
         body = render_template_string(SENT, rows=rows)
@@ -158,6 +177,22 @@ def draft_action(siren):
     return redirect(url_for("index", tab="drafts"))
 
 
+@app.post("/import")
+def import_mails():
+    con = connect()
+    allowed = {r["siren"]: r["nom"] for r in cli.next_to_write(con)}
+    ok, errors = mailer.parse_batch(request.form.get("text", ""), allowed)
+    for siren, (subject, body) in ok.items():
+        con.execute("UPDATE companies SET status='drafted', subject=?, body=?, contacted_at=? WHERE siren=?",
+                    (subject, body, db.now(), siren))
+    con.commit()
+    msg = f"{len(ok)} mails importés dans « À valider »."
+    if errors:
+        msg += " Refusés : " + " ; ".join(errors[:5])
+    session["msg"] = msg
+    return redirect(url_for("index", tab="drafts" if ok else "write"))
+
+
 @app.post("/mark/<siren>")
 def mark(siren):
     s = request.form.get("s")
@@ -187,7 +222,8 @@ def _run_daily():
         cli.cmd_qualify(con, A)
         _job["log"] = "Rédaction des mails…"
         cli.cmd_run(con, A)
-        _job["log"] = "Terminé : voir « À valider »."
+        _job["log"] = ("Terminé : voir « À valider »." if config.env("ANTHROPIC_API_KEY")
+                       else "Terminé : passez à « À rédiger » pour faire écrire les mails par Claude.")
     except Exception as exc:
         _job["log"] = f"Erreur : {exc}"
     finally:

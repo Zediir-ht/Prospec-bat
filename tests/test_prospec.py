@@ -196,3 +196,32 @@ def test_qualify_keeps_osm_email(tmp_path, monkeypatch):
     cli.cmd_qualify(con, A)
     row = con.execute("SELECT status, email, email_source FROM companies").fetchone()
     assert tuple(row) == ("qualified", "c@calmels.fr", "osm")
+
+
+def test_never_send_to_unsourced_address(tmp_path):
+    import pytest
+    from prospec import cli
+
+    con = db.connect(tmp_path / "t.db")
+    con.execute("INSERT INTO companies(siren,nom,email,email_source,status) VALUES('1','A','info@a.fr',NULL,'qualified')")
+    con.execute("INSERT INTO companies(siren,nom,email,email_source,status) VALUES('2','B','x@b.fr','deviné','qualified')")
+    con.execute("INSERT INTO companies(siren,nom,email,email_source,status) VALUES('3','C','c@c.fr','osm','qualified')")
+    con.commit()
+    con.execute("UPDATE companies SET email_source=NULL WHERE siren='1'")  # une base ancienne passerait par la migration
+    rows = con.execute("SELECT * FROM companies").fetchall()
+    assert [r["siren"] for r in cli.next_to_write(con)] == ["3"]
+    for r in rows[:2]:
+        with pytest.raises(ValueError):
+            mailer.assert_sourced(r)
+    mailer.assert_sourced(rows[2])
+
+
+def test_migration_marks_old_emails_as_site(tmp_path):
+    import sqlite3
+
+    path = tmp_path / "old.db"
+    con = db.connect(path)
+    con.execute("INSERT INTO companies(siren,nom,email,status) VALUES('1','A','contact@a.fr','qualified')")
+    con.commit()
+    con.close()
+    assert db.connect(path).execute("SELECT email_source FROM companies").fetchone()[0] == "site"

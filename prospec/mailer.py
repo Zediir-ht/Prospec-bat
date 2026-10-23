@@ -126,6 +126,12 @@ def parse_batch(text, allowed):
 SOURCES = {"site": "sur le site web de votre entreprise", "osm": "dans OpenStreetMap, où elle est publiée pour votre entreprise"}
 
 
+def assert_sourced(row):
+    """Refuse tout envoi vers une adresse dont l'origine n'est pas connue : jamais d'adresse devinée."""
+    if not row["email"] or row["email_source"] not in SOURCES:
+        raise ValueError(f"adresse non sourcée pour {row['nom']} : envoi refusé")
+
+
 def signature(source=None):
     s = config.sender()
     lines = ["", "Cordialement,", f"{s['prenom']} {s['nom']}", f"Création de sites web - {s['site']}"]

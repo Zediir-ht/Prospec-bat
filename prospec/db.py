@@ -34,6 +34,8 @@ def connect(path=None):
         except sqlite3.OperationalError:
             pass
     con.execute("UPDATE companies SET status='no_email' WHERE status='to_call'")
+    # avant l'ajout de email_source, toute adresse venait d'une lecture du site de l'entreprise
+    con.execute("UPDATE companies SET email_source='site' WHERE email IS NOT NULL AND email_source IS NULL")
     con.commit()
     return con
 

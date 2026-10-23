@@ -61,6 +61,7 @@ def cmd_qualify(con, args):
 
 
 def contact(con, row, subject, body, mode, followup=False):
+    mailer.assert_sourced(row)
     if mode != "review":  # en mode review, l'envoi se fait depuis le dashboard
         mailer.deliver(mailer.build_message(row["email"], subject, body, row["email_source"]), mode)
     ts = db.now()
@@ -77,7 +78,7 @@ def contact(con, row, subject, body, mode, followup=False):
 def next_to_write(con):
     """Entreprises qualifiées, Aveyron d'abord, puis celles sans site ; exclut les désinscrits."""
     rows = con.execute(
-        "SELECT * FROM companies WHERE status='qualified' "
+        "SELECT * FROM companies WHERE status='qualified' AND email IS NOT NULL AND email_source IN ('site','osm') "
         "ORDER BY (code_postal LIKE '12%') DESC, (site_status='none') DESC, siren"
     ).fetchall()
     return [r for r in rows if not db.is_suppressed(con, r["email"])]

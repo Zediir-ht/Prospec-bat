@@ -171,6 +171,10 @@ def draft_action(siren):
         if act == "send":
             if db.is_suppressed(con, row["email"]):
                 abort(409, "Adresse désinscrite")
+            try:
+                mailer.assert_sourced(row)
+            except ValueError as exc:
+                abort(409, str(exc))
             mailer.send(mailer.build_message(row["email"], subject, body, row["email_source"]))
             con.execute("UPDATE companies SET status='sent', contacted_at=? WHERE siren=?", (db.now(), siren))
     con.commit()

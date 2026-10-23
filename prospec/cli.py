@@ -55,11 +55,11 @@ def apply_result(con, row, res):
 
 
 def qualify_batch(con, limit, until_target=True, stop=None, log=None, base=(0, 0), workers=None):
-    """Teste jusqu'à `limit` entreprises avec `workers` recherches en parallèle (WORKERS, 10 par défaut).
+    """Teste jusqu'à `limit` entreprises avec `workers` recherches en parallèle (WORKERS, 20 par défaut).
     Avec until_target, s'arrête dès que `target()` mails exploitables sont réunis. `stop()` permet
     d'interrompre, `log(texte)` de suivre la progression. Retourne (entreprises testées, adresses trouvées).
     Les fils ne font que du réseau ; la base n'est écrite que par ce fil-ci."""
-    workers = workers or int(config.env("WORKERS", "10"))
+    workers = workers or int(config.env("WORKERS", "20"))
     rows = iter(con.execute(
         "SELECT * FROM companies WHERE status='new' ORDER BY (code_postal LIKE '12%') DESC, RANDOM() LIMIT ?", (limit,)
     ).fetchall())

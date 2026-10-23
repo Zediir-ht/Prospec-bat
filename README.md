@@ -1,6 +1,6 @@
 # Prospec-bat
 
-Prospection automatisée pour [zdrdev.fr](https://zdrdev.fr) auprès des entreprises du bâtiment d'Aveyron (12).
+Prospection automatisée pour [zdrdev.fr](https://zdrdev.fr) auprès des artisans, commerçants, restaurateurs et entreprises du bâtiment d'Aveyron (12) et des départements voisins (48, 15, 46, 81, 82).
 Angle : **maquette de site gratuite**, aucun prix dans les mails. 10 mails/jour.
 
 ## Installation
@@ -20,7 +20,7 @@ python -m prospec.cli suppress x@y.fr # désinscription (à faire à chaque "STO
 Quotidien (cron, 9h en semaine) : `qualify -n 30 && run`.
 
 ## Cadre légal (B2B, CNIL)
-Mail en rapport avec l'activité du destinataire, expéditeur identifié, mention de désinscription, liste de suppression respectée. Les entrepreneurs individuels sont exclus par défaut (`config.py`).
+Mail en rapport avec l'activité du destinataire, expéditeur identifié, mention de désinscription, liste de suppression respectée. Les entrepreneurs individuels ne sont contactés que sur une adresse professionnelle (jamais Gmail, Orange, etc.).
 Renseigner `SENDER_LEGAL` (raison sociale, SIRET, adresse) avant tout envoi.
 
 ## Dashboard mobile
@@ -54,3 +54,8 @@ git clone -b claude/prospection-batiment-aveyron-zojkz0 https://github.com/zedii
 cd prospec-bat && ./install.sh
 ```
 Le script installe les dépendances, pose 3 questions (mot de passe d'application Gmail, mentions légales, téléphone), génère les secrets, puis lance le dashboard sur http://localhost:8000.
+
+## Réglages (.env)
+- `DEPARTEMENTS` : par défaut `12,48,15,46,81,82` (Aveyron en priorité). Ajouter `30`, `34` pour élargir.
+- `SECTEURS` : par défaut `batiment,alimentaire,restauration,artisanat,services,commerce`.
+Les entreprises sont récupérées progressivement : l'Aveyron en entier au premier lancement, puis quelques départements voisins à chaque « Préparer les mails du jour ».

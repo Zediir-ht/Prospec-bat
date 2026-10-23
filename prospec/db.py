@@ -7,7 +7,7 @@ SCHEMA = """
 CREATE TABLE IF NOT EXISTS companies (
     siren TEXT PRIMARY KEY,
     nom TEXT, commune TEXT, code_postal TEXT, naf TEXT, metier TEXT,
-    dirigeant TEXT, effectif TEXT,
+    dirigeant TEXT, effectif TEXT, nature_juridique TEXT,
     site_url TEXT, site_status TEXT,   -- none | ok | outdated | unknown
     site_issues TEXT,
     email TEXT,
@@ -16,6 +16,7 @@ CREATE TABLE IF NOT EXISTS companies (
     contacted_at TEXT, followup_at TEXT,
     created_at TEXT DEFAULT CURRENT_TIMESTAMP
 );
+CREATE TABLE IF NOT EXISTS sourced (dept TEXT, naf TEXT, PRIMARY KEY (dept, naf));
 CREATE TABLE IF NOT EXISTS settings (key TEXT PRIMARY KEY, value TEXT);
 CREATE TABLE IF NOT EXISTS suppression (email TEXT PRIMARY KEY, added_at TEXT DEFAULT CURRENT_TIMESTAMP);
 """
@@ -26,6 +27,10 @@ def connect(path=None):
     con = sqlite3.connect(path or DB_PATH)
     con.row_factory = sqlite3.Row
     con.executescript(SCHEMA)
+    try:  # base créée avant l'ajout de cette colonne
+        con.execute("ALTER TABLE companies ADD COLUMN nature_juridique TEXT")
+    except sqlite3.OperationalError:
+        pass
     con.execute("UPDATE companies SET status='no_email' WHERE status='to_call'")
     con.commit()
     return con

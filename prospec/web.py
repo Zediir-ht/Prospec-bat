@@ -181,9 +181,8 @@ def _run_daily():
         n = int(config.env("QUALIFY_PER_DAY", "30"))
     con = db.connect()
     try:
-        if not con.execute("SELECT 1 FROM companies LIMIT 1").fetchone():
-            _job["log"] = "Récupération des entreprises…"
-            cli.cmd_source(con, A)
+        _job["log"] = "Récupération des entreprises…"
+        cli.cmd_source(con, A)
         _job["log"] = "Qualification des entreprises…"
         cli.cmd_qualify(con, A)
         _job["log"] = "Rédaction des mails…"

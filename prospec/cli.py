@@ -12,13 +12,15 @@ def cmd_source(con, _):
 
 
 def cmd_qualify(con, args):
-    rows = con.execute("SELECT * FROM companies WHERE status='new' ORDER BY RANDOM() LIMIT ?", (args.n,)).fetchall()
+    rows = con.execute("SELECT * FROM companies WHERE status='new' ORDER BY (code_postal LIKE '12%') DESC, RANDOM() LIMIT ?", (args.n,)).fetchall()
     for row in rows:
         res = qualify.qualify_company(dict(row))
         if res["site_status"] == "ok":
             status = "skip"  # site correct : hors cible
         elif res["site_status"] == "unknown":
             continue  # réessayé plus tard
+        elif res["email"] and row["nature_juridique"] == "1000" and res["email"].split("@")[-1] in config.FREE_MAIL_DOMAINS:
+            status = "skip"  # entrepreneur individuel : pas de prospection sur une messagerie personnelle
         elif res["email"]:
             status = "qualified"
         else:
@@ -65,7 +67,7 @@ def cmd_run(con, args):
             time.sleep(random.uniform(60, 240))
     # 2. nouveaux contacts : les entreprises sans site d'abord
     rows = con.execute(
-        "SELECT * FROM companies WHERE status='qualified' ORDER BY (site_status='none') DESC, RANDOM()"
+        "SELECT * FROM companies WHERE status='qualified' ORDER BY (code_postal LIKE '12%') DESC, (site_status='none') DESC, RANDOM()"
     ).fetchall()
     for row in rows:
         if done >= limit:

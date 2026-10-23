@@ -10,7 +10,7 @@ ENTREPRENEUR_INDIVIDUEL = "1000"
 
 
 def metier_for(naf):
-    return config.METIERS.get(naf[:5], "bâtiment")
+    return config.NAF_METIERS.get(naf) or config.METIERS.get(naf[:5]) or "entreprise"
 
 
 def parse_result(r):
@@ -34,14 +34,14 @@ def parse_result(r):
     }
 
 
-def fetch_naf(naf, session=None, max_pages=40):
+def fetch_naf(naf, dept, session=None, max_pages=40):
     session = session or requests.Session()
     page = 1
     while page <= max_pages:
         resp = session.get(
             API,
             params={
-                "departement": config.DEPARTEMENT,
+                "departement": dept,
                 "activite_principale": naf,
                 "etat_administratif": "A",
                 "per_page": 25,
@@ -59,18 +59,27 @@ def fetch_naf(naf, session=None, max_pages=40):
         time.sleep(0.25)  # limite API : ~7 requêtes/s
 
 
-def source(con, session=None):
-    added = 0
-    for naf in config.NAF_CODES:
-        for c in fetch_naf(naf, session):
-            if config.EXCLURE_ENTREPRENEURS_INDIVIDUELS and c["nature_juridique"] == ENTREPRENEUR_INDIVIDUEL:
+def source(con, session=None, max_other=30):
+    """Récupère les entreprises par (département, code NAF). L'Aveyron (1er département) est traité en
+    entier ; les autres départements avancent de `max_other` requêtes par appel, pour ne pas bloquer."""
+    done = {(r["dept"], r["naf"]) for r in con.execute("SELECT dept, naf FROM sourced")}
+    added = other = 0
+    for dept in config.DEPARTEMENTS:
+        for naf in config.NAF_CODES:
+            if (dept, naf) in done:
                 continue
-            cur = con.execute(
-                """INSERT OR IGNORE INTO companies
-                   (siren, nom, commune, code_postal, naf, metier, dirigeant, effectif)
-                   VALUES (:siren,:nom,:commune,:code_postal,:naf,:metier,:dirigeant,:effectif)""",
-                c,
-            )
-            added += cur.rowcount
-        con.commit()
+            if dept != config.DEPARTEMENTS[0]:
+                if other >= max_other:
+                    return added
+                other += 1
+            for c in fetch_naf(naf, dept, session):
+                cur = con.execute(
+                    """INSERT OR IGNORE INTO companies
+                       (siren, nom, commune, code_postal, naf, metier, dirigeant, effectif, nature_juridique)
+                       VALUES (:siren,:nom,:commune,:code_postal,:naf,:metier,:dirigeant,:effectif,:nature_juridique)""",
+                    c,
+                )
+                added += cur.rowcount
+            con.execute("INSERT OR IGNORE INTO sourced(dept, naf) VALUES (?, ?)", (dept, naf))
+            con.commit()
     return added

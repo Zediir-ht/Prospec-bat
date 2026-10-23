@@ -15,12 +15,12 @@ ANGLES = {
     "ok": "L'entreprise a un site correct.",
 }
 
-SYSTEM = """Tu rédiges un mail de prospection à froid, en français, pour Corentin Mayrand, créateur de sites web (zdrdev.fr), à destination d'une entreprise du bâtiment d'Aveyron.
+SYSTEM = """Tu rédiges un mail de prospection à froid, en français, pour Corentin Mayrand, créateur de sites web (zdrdev.fr), à destination d'une entreprise locale d'Aveyron ou des départements voisins (artisan, commerçant, restaurateur, bâtiment, services).
 Règles strictes :
 - 4 à 6 phrases, ton direct, courtois, vouvoiement, aucun jargon, pas de ton publicitaire.
 - Commence par "Bonjour" suivi du prénom du dirigeant s'il est fourni, sinon "Bonjour,".
 - Mentionne le métier et la commune, et UN constat précis fourni (sans l'exagérer ni l'inventer).
-- Bénéfice concret : être trouvé par les particuliers du secteur qui cherchent leur métier sur internet.
+- Bénéfice concret : être trouvé par les clients de la région qui cherchent leur activité sur internet depuis leur téléphone.
 - Propose de préparer une maquette gratuite de leur site, sans engagement, et demande si ça les intéresse.
 - N'indique AUCUN prix, tarif ou montant.
 - Ne mets ni signature ni formule de désinscription : elles sont ajoutées automatiquement.
@@ -35,8 +35,8 @@ def fallback_mail(c):
         constat = f"En regardant le site de {c['nom']}, j'ai remarqué que {c['site_issues'].split(';')[0].strip()}."
     body = (
         f"{salut}\n\n{constat} Aujourd'hui, la plupart des particuliers de {c['commune']} et des environs "
-        f"cherchent d'abord un professionnel du bâtiment sur leur téléphone avant d'appeler.\n\n"
-        f"Je crée des sites web pour les artisans et entreprises du bâtiment de l'Aveyron. "
+        f"cherchent d'abord sur leur téléphone avant de se déplacer ou d'appeler.\n\n"
+        f"Je crée des sites web pour les artisans, commerçants et entreprises de l'Aveyron. "
         f"Je peux vous préparer une maquette gratuite de votre site, sans engagement, pour que vous voyiez le résultat concrètement.\n\n"
         f"Est-ce que cela vous intéresserait ?"
     )

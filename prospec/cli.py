@@ -1,11 +1,11 @@
-"""Usage : python -m prospec.cli {source|osm|discover [-n N]|qualify [--all]|collect [-n N]|run|suppress EMAIL|stats}"""
+"""Usage : python -m prospec.cli {source|osm|discover [-n N]|inbox|qualify [--all]|collect [-n N]|run|suppress EMAIL|stats}"""
 import argparse
 import random
 import sys
 import time
 from concurrent.futures import FIRST_COMPLETED, ThreadPoolExecutor, wait
 
-from . import config, db, discovery, mailer, osm, qualify, sourcing
+from . import config, db, discovery, inbox, mailer, osm, qualify, sourcing
 
 
 def cmd_source(con, _):
@@ -20,6 +20,10 @@ def cmd_osm(con, _):
 def cmd_discover(con, args):
     done, linked = discovery.run(con, max_queries=args.n)
     print(f"{done} recherches par métier et ville, {linked} sites rattachés à une entreprise")
+
+
+def cmd_inbox(con, _):
+    print(inbox.summary(inbox.check(con)))
 
 
 def target():
@@ -134,10 +138,31 @@ def cmd_collect(con, args, stop=None, log=None):
     return tested, found
 
 
+def remember_message(con, siren, msg):
+    """Garde l'identifiant du mail envoyé : les réponses le citent, ce qui permet de les reconnaître."""
+    con.execute("UPDATE companies SET message_ids=TRIM(COALESCE(message_ids,'') || ' ' || ?) WHERE siren=?",
+                (msg["Message-ID"], siren))
+
+
+def send_now(con, row, subject, body):
+    """Envoie tout de suite un mail validé (dashboard). Lève ValueError si l'adresse ne doit pas être contactée."""
+    if db.is_suppressed(con, row["email"]):
+        raise ValueError(f"{row['email']} est désinscrite")
+    mailer.assert_sourced(row)
+    msg = mailer.build_message(row["email"], subject, body, row["email_source"])
+    mailer.send(msg)
+    remember_message(con, row["siren"], msg)
+    con.execute("UPDATE companies SET status='sent', subject=?, body=?, contacted_at=? WHERE siren=?",
+                (subject, body, db.now(), row["siren"]))
+    con.commit()
+
+
 def contact(con, row, subject, body, mode, followup=False):
     mailer.assert_sourced(row)
     if mode != "review":  # en mode review, l'envoi se fait depuis le dashboard
-        mailer.deliver(mailer.build_message(row["email"], subject, body, row["email_source"]), mode)
+        msg = mailer.build_message(row["email"], subject, body, row["email_source"])
+        mailer.deliver(msg, mode)
+        remember_message(con, row["siren"], msg)
     ts = db.now()
     if followup:
         con.execute("UPDATE companies SET status='followed_up', followup_at=? WHERE siren=?", (ts, row["siren"]))
@@ -215,12 +240,13 @@ def main():
     q.add_argument("--all", action="store_true", help="ne pas s'arrêter à DAILY_LIMIT")
     c = sub.add_parser("collect"); c.add_argument("-n", type=int, default=1000)
     d = sub.add_parser("discover"); d.add_argument("-n", type=int, default=20)
+    sub.add_parser("inbox")
     sub.add_parser("run")
     s = sub.add_parser("suppress"); s.add_argument("email")
     sub.add_parser("stats")
     args = p.parse_args()
     con = db.connect()
-    {"source": cmd_source, "osm": cmd_osm, "collect": cmd_collect, "discover": cmd_discover, "qualify": cmd_qualify, "run": cmd_run, "suppress": cmd_suppress,
+    {"source": cmd_source, "osm": cmd_osm, "collect": cmd_collect, "discover": cmd_discover, "inbox": cmd_inbox, "qualify": cmd_qualify, "run": cmd_run, "suppress": cmd_suppress,
      "stats": cmd_stats}[args.cmd](con, args)
 
 

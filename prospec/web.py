@@ -1,11 +1,13 @@
 """Dashboard mobile : valider les mails du jour, voir les stats, gérer les désinscriptions."""
 import hmac
+import random
 import threading
+import time
 from urllib.parse import quote_plus
 
 from flask import Flask, abort, jsonify, redirect, render_template_string, request, session, url_for
 
-from . import cli, config, db, mailer
+from . import cli, config, db, inbox, mailer
 
 app = Flask(__name__)
 app.secret_key = config.env("DASHBOARD_SECRET") or config.env("DASHBOARD_PASSWORD", "change-me")
@@ -89,7 +91,7 @@ background:var(--c);box-shadow:0 0 0 3px var(--line),inset 0 -5px 0 #0003,inset 
 .stat:active,.stat:hover{transform:translateY(-4px) rotate(-1deg)}
 .mut{color:var(--mut);font-size:15px}
 .tag{display:inline-block;font:700 13px/1 var(--display);padding:6px 11px;border-radius:999px;background:var(--sky);color:var(--blue2);margin:2px 6px 2px 0;box-shadow:inset 0 0 0 2px #c9dcff}
-.tag.hot{background:#ffe4e4;color:var(--red2);box-shadow:inset 0 0 0 2px #ffc2c2}.tag.warm{background:#fff3cc;color:#8a5d00;box-shadow:inset 0 0 0 2px #ffe08a}
+.tag.good{background:#dcf8e4;color:var(--green2);box-shadow:inset 0 0 0 2px #a8ebbb}.tag.hot{background:#ffe4e4;color:var(--red2);box-shadow:inset 0 0 0 2px #ffc2c2}.tag.warm{background:#fff3cc;color:#8a5d00;box-shadow:inset 0 0 0 2px #ffe08a}
 input,textarea,select{width:100%;min-width:0;padding:12px 14px;border:0;border-radius:16px;background:var(--soft);color:var(--ink);font:16px/1.5 var(--body);
 box-shadow:inset 0 0 0 2.5px #c9d3f0}
 input:focus,textarea:focus,select:focus{outline:none;box-shadow:inset 0 0 0 3px var(--blue),0 0 0 4px #2f7bff33}
@@ -107,6 +109,7 @@ button[disabled]{opacity:.7;cursor:wait}
 .btn.gh{background:#fff;color:var(--ink);box-shadow:0 0 0 3px var(--line),0 5px 0 3px var(--line)}
 .btn.big{font-size:18px;padding:17px 20px 18px;width:100%;text-align:center;background:var(--yellow);color:var(--ink);box-shadow:0 0 0 3px var(--line),0 6px 0 3px var(--yellow2),inset 0 4px 0 #fff8}
 pre.sig{font:600 14px/1.45 var(--body);color:var(--mut);background:var(--soft);border-radius:16px;padding:4px 14px 12px;margin:0}
+.btn.big.ok{background:var(--green);color:#fff;box-shadow:0 0 0 3px var(--line),0 6px 0 3px var(--green2),inset 0 4px 0 #fff6}
 pre{white-space:pre-wrap;font:700 14px/1.5 var(--display);margin:12px 0 0;color:var(--blue2)}
 a{color:var(--blue2);font-weight:700}
 .msg{background:#e3fbea;font:700 15px/1.4 var(--display);display:flex;gap:10px;align-items:center}
@@ -163,10 +166,17 @@ HOME = """<div class="block quest" style="--n:{{limit}}"><h2>Quête du jour</h2>
 
 SITE = "{{ {'none':'pas de site','outdated':'site à refaire'}.get(c.site_status,c.site_status) }}"
 
-DRAFT = """{% for c in rows %}<div class="block"><h2>{{c.enseigne or c.nom}}</h2>
+DRAFT = """{% if rows %}<div class="block" style="--c:var(--green)"><h2>{{rows|length}} mails prêts</h2>
+<p class="mut">Envoie tous les mails ci-dessous, avec vos modifications, espacés de quelques secondes.{% if rows|length > left %} Quota du jour : {{left}} envoi(s) restant(s), les autres attendront demain.{% endif %}</p>
+<form method="post" action="{{url_for('send_all')}}" id="sendall"><div class="row"><button class="btn big ok" {{'disabled' if running or not left}}>✉ Tout envoyer ({{[rows|length, left]|min}})</button></div></form></div>
+<script>document.getElementById("sendall").addEventListener("submit",function(e){
+var f=this,n={{[rows|length, left]|min}};if(!confirm("Envoyer "+n+" mail(s) maintenant ?")){e.preventDefault();return}
+document.querySelectorAll("form[data-siren]").forEach(function(d){["subject","body"].forEach(function(k){
+var i=document.createElement("input");i.type="hidden";i.name=k+"_"+d.dataset.siren;i.value=d.elements[k].value;f.appendChild(i)})})});</script>{% endif %}
+{% for c in rows %}<div class="block"><h2>{{c.enseigne or c.nom}}</h2>
 <span class="tag">{{c.commune}}</span><span class="tag">{{c.metier}}</span><span class="tag {{'hot' if c.site_status=='none' else 'warm'}}">""" + SITE + """</span>
 <div class="mut" style="margin-top:6px">{{c.email}}{% if c.site_url %} · <a href="{{c.site_url}}" target="_blank" rel="noopener">voir le site</a>{% endif %}</div>
-<form method="post" action="{{url_for('draft_action',siren=c.siren)}}"><input name="subject" aria-label="Objet" value="{{c.subject}}" style="margin-top:10px">
+<form method="post" action="{{url_for('draft_action',siren=c.siren)}}" data-siren="{{c.siren}}"><input name="subject" aria-label="Objet" value="{{c.subject}}" style="margin-top:10px">
 <textarea name="body" aria-label="Message">{{c.body}}</textarea>
 <p class="mut" style="margin:10px 0 4px">Ajouté automatiquement en bas du mail :</p><pre class="sig">{{sig(c.email_source)}}</pre><div class="row">
 <button name="act" value="send" class="ok" onclick="return confirm('Envoyer ce mail à {{c.email}} ?')">✉ Envoyer</button>
@@ -185,10 +195,15 @@ WRITE = """{% if auto %}<div class="block"><h2>Rédaction automatique</h2><p cla
 function done(){document.getElementById("copied").hidden=false}
 if(navigator.clipboard&&navigator.clipboard.writeText){navigator.clipboard.writeText(t.value).then(done,function(){t.hidden=false;t.select()})}else{t.hidden=false;t.select();document.execCommand("copy");done()}});</script>{% endif %}"""
 
-SENT = """{% for c in rows %}<div class="block"><h2>{{c.enseigne or c.nom}}</h2><span class="tag {{'warm' if c.status=='followed_up'}}">{{ {'sent':'envoyé','followed_up':'relancé'}.get(c.status,c.status) }}</span>
-<div class="mut" style="margin-top:6px">{{c.email}} · {{(c.contacted_at or '')[:16]|replace('T',' ')}}</div>
-<form method="post" action="{{url_for('mark',siren=c.siren)}}"><div class="row">
-<button name="s" value="replied" class="ok">★ A répondu</button><button name="s" value="refused" class="ko">Refus</button></div></form></div>
+SENT = """<form class="block" style="--c:var(--blue)" method="post" action="{{url_for('check_inbox')}}"><h2>Réponses</h2>
+<p class="mut">Lit votre boîte Gmail (sans rien modifier) : réponses, demandes STOP et adresses en erreur sont reconnues toutes seules.</p>
+<div class="row"><button class="btn">📬 Vérifier les réponses</button></div></form>
+{% for c in rows %}<div class="block" style="--c:var({{ {'replied':'--green','refused':'--red','bounced':'--red'}.get(c.status,'--blue') }})"><h2>{{c.enseigne or c.nom}}</h2>
+<span class="tag {{ {'replied':'good','refused':'hot','bounced':'hot','followed_up':'warm'}.get(c.status,'') }}">{{ {'sent':'envoyé','followed_up':'relancé','replied':'a répondu','refused':'STOP / refus','bounced':'adresse en erreur'}.get(c.status,c.status) }}</span>
+<div class="mut" style="margin-top:6px">{{c.email}} · envoyé le {{c.contacted_at|frdate}}{% if c.reply_at %} · réponse le {{c.reply_at|frdate}}{% endif %}</div>
+{% if c.reply_snippet %}<pre class="sig" style="margin-top:10px;padding-top:12px">« {{c.reply_snippet}} »</pre>{% endif %}
+{% if c.status in ('sent','followed_up') %}<form method="post" action="{{url_for('mark',siren=c.siren)}}"><div class="row">
+<button name="s" value="replied" class="ok">★ A répondu</button><button name="s" value="refused" class="ko">Refus</button></div></form>{% endif %}</div>
 {% else %}<div class="block idle"><i class="bot"></i><span class="mut">Rien d'envoyé pour l'instant.</span></div>{% endfor %}"""
 
 TABS = [("home", "Accueil"), ("write", "À rédiger"), ("drafts", "À valider"), ("sent", "Envoyés")]
@@ -214,6 +229,13 @@ def sent_today(con):
     return con.execute(
         "SELECT COUNT(*) FROM companies WHERE status IN ('sent','followed_up','replied','refused') "
         "AND substr(contacted_at, 1, 10) = date('now', 'localtime')").fetchone()[0]
+
+
+@app.template_filter("frdate")
+def frdate(value):
+    """« 2026-10-23T13:37:00 » -> « 23/10 à 13:37 »."""
+    v = value or ""
+    return f"{v[8:10]}/{v[5:7]} à {v[11:16]}" if len(v) >= 16 else v
 
 
 def connect():
@@ -259,14 +281,18 @@ def index():
     con = connect()
     if tab == "drafts":
         rows = con.execute("SELECT * FROM companies WHERE status='drafted' ORDER BY contacted_at").fetchall()
-        body = render_template_string(DRAFT, rows=rows, sig=mailer.signature)
+        body = render_template_string(DRAFT, rows=rows, sig=mailer.signature, running=_job["running"],
+                                      left=max(0, cli.target() - sent_today(con)))
     elif tab == "write":
         batch = cli.next_to_write(con)[: int(config.env("DAILY_LIMIT", "10"))]
         body = render_template_string(
             WRITE, auto=bool(config.env("ANTHROPIC_API_KEY")), n=len(cli.next_to_write(con)), batch=batch,
             prompt=mailer.batch_prompt([dict(r) for r in batch]) if batch else "")
     elif tab == "sent":
-        rows = con.execute("SELECT * FROM companies WHERE status IN ('sent','followed_up') ORDER BY contacted_at DESC LIMIT 100").fetchall()
+        rows = con.execute(
+            "SELECT * FROM companies WHERE status IN ('sent','followed_up','replied','bounced') "
+            "OR (status='refused' AND contacted_at IS NOT NULL) "
+            "ORDER BY (status='replied' AND reply_at IS NOT NULL) DESC, COALESCE(reply_at, contacted_at) DESC LIMIT 150").fetchall()
         body = render_template_string(SENT, rows=rows)
     else:
         tab = "home"
@@ -298,14 +324,10 @@ def draft_action(siren):
     elif act in ("save", "send"):
         con.execute("UPDATE companies SET subject=?, body=? WHERE siren=?", (subject, body, siren))
         if act == "send":
-            if db.is_suppressed(con, row["email"]):
-                abort(409, "Adresse désinscrite")
             try:
-                mailer.assert_sourced(row)
+                cli.send_now(con, row, subject, body)
             except ValueError as exc:
                 abort(409, str(exc))
-            mailer.send(mailer.build_message(row["email"], subject, body, row["email_source"]))
-            con.execute("UPDATE companies SET status='sent', contacted_at=? WHERE siren=?", (db.now(), siren))
     con.commit()
     return redirect(url_for("index", tab="drafts"))
 
@@ -324,6 +346,53 @@ def import_mails():
         msg += " Refusés : " + " ; ".join(errors[:5])
     session["msg"] = msg
     return redirect(url_for("index", tab="drafts" if ok else "write"))
+
+
+@app.post("/inbox")
+def check_inbox():
+    try:
+        session["msg"] = inbox.summary(inbox.check(connect()))
+    except Exception as exc:
+        session["msg"] = f"Impossible de lire la boîte Gmail : {exc}. Vérifiez GMAIL_APP_PASSWORD dans .env."
+    return redirect(url_for("index", tab="sent"))
+
+
+@app.post("/send-all")
+def send_all():
+    con = connect()
+    rows = con.execute("SELECT * FROM companies WHERE status='drafted' ORDER BY contacted_at").fetchall()
+    for r in rows:  # enregistre d'abord les modifications faites à l'écran
+        subject, body = request.form.get(f"subject_{r['siren']}"), request.form.get(f"body_{r['siren']}")
+        if subject is not None and body is not None:
+            con.execute("UPDATE companies SET subject=?, body=? WHERE siren=?", (subject, body, r["siren"]))
+    con.commit()
+    if start_job(_run_send_all):
+        session["msg"] = "Envoi en cours : suivez la progression ci-dessous."
+    return redirect(url_for("index"))
+
+
+def _run_send_all():
+    con = db.connect()
+    try:
+        left = max(0, cli.target() - sent_today(con))
+        rows = con.execute("SELECT * FROM companies WHERE status='drafted' ORDER BY contacted_at LIMIT ?", (left,)).fetchall()
+        sent, errors = 0, []
+        for i, row in enumerate(rows):
+            if _job["stop"]:
+                break
+            if i:  # espace les envois : un envoi en rafale ressemble à du spam
+                pause = random.uniform(*(float(x) for x in config.env("SEND_SPACING", "15,40").split(",")))
+                _job["log"] = f"Envoi {sent}/{len(rows)}… prochain dans {int(pause)} s"
+                time.sleep(pause)
+            try:
+                cli.send_now(con, row, row["subject"], row["body"])
+                sent += 1
+            except Exception as exc:
+                errors.append(f"{row['enseigne'] or row['nom']} : {exc}")
+            _job["log"] = f"Envoi {sent}/{len(rows)}…"
+        _job["log"] = f"{sent} mail(s) envoyé(s)." + (" Erreurs : " + " ; ".join(errors) if errors else "")
+    finally:
+        _job["running"] = False
 
 
 @app.post("/mark/<siren>")
@@ -349,6 +418,11 @@ def _run_daily():
         n = int(config.env("QUALIFY_PER_DAY", "150"))
     con = db.connect()
     try:
+        _job["log"] = "Lecture des réponses…"
+        try:
+            print(inbox.summary(inbox.check(con)))
+        except Exception as exc:  # boîte inaccessible : on continue sans bloquer la journée
+            print(f"Boîte Gmail inaccessible : {exc}")
         if cli.pending(con) < cli.target():  # sinon : déjà assez de mails, aucune recherche
             _job["log"] = "Récupération des entreprises…"
             cli.cmd_source(con, A)

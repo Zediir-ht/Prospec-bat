@@ -11,13 +11,14 @@ CREATE TABLE IF NOT EXISTS companies (
     site_url TEXT, site_status TEXT,   -- none | ok | outdated | unknown
     site_issues TEXT,
     email TEXT, email_source TEXT,
-    status TEXT DEFAULT 'new',         -- new | qualified | no_email | drafted | sent | followed_up | replied | refused | skip
+    status TEXT DEFAULT 'new',         -- new | qualified | no_email | drafted | sent | followed_up | replied | refused | bounced | skip
     subject TEXT, body TEXT,
     contacted_at TEXT, followup_at TEXT,
     created_at TEXT DEFAULT CURRENT_TIMESTAMP
 );
 CREATE TABLE IF NOT EXISTS osm_places (osm_id TEXT PRIMARY KEY, dept TEXT, name TEXT, email TEXT, website TEXT, city TEXT, postcode TEXT);
 CREATE TABLE IF NOT EXISTS discovered (query TEXT PRIMARY KEY, done_at TEXT);
+CREATE TABLE IF NOT EXISTS inbox_seen (uid TEXT PRIMARY KEY);
 CREATE TABLE IF NOT EXISTS sourced (dept TEXT, naf TEXT, PRIMARY KEY (dept, naf));
 CREATE TABLE IF NOT EXISTS settings (key TEXT PRIMARY KEY, value TEXT);
 CREATE TABLE IF NOT EXISTS suppression (email TEXT PRIMARY KEY, added_at TEXT DEFAULT CURRENT_TIMESTAMP);
@@ -29,7 +30,7 @@ def connect(path=None):
     con = sqlite3.connect(path or DB_PATH)
     con.row_factory = sqlite3.Row
     con.executescript(SCHEMA)
-    for col in ("nature_juridique", "email_source", "enseigne"):  # colonnes ajoutées après la 1re version
+    for col in ("nature_juridique", "email_source", "enseigne", "message_ids", "reply_at", "reply_snippet"):  # colonnes ajoutées après la 1re version
         try:
             con.execute(f"ALTER TABLE companies ADD COLUMN {col} TEXT")
         except sqlite3.OperationalError:

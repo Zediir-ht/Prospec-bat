@@ -73,3 +73,44 @@ def test_write_tab_and_import(client):
     r = client.post("/import", data={"text": reply})
     assert r.status_code == 302
     assert b"Un site pour Martin" in client.get("/?tab=drafts").data
+
+
+def test_send_all(client, monkeypatch):
+    sent = []
+    monkeypatch.setattr(web.mailer, "send", sent.append)
+    monkeypatch.setenv("SEND_SPACING", "0,0")
+    con = db.connect()
+    con.execute("UPDATE companies SET email_source='site'")
+    con.execute("INSERT INTO companies(siren,nom,commune,email,email_source,status,site_status,subject,body,contacted_at) "
+                "VALUES('5','BRU','Rodez','b@bru.fr','site','drafted','none','S2','B2','2026-01-02')")
+    con.commit()
+    login(client)
+    page = client.get("/?tab=drafts").data.decode()
+    assert "Tout envoyer (2)" in page
+    monkeypatch.setattr(web, "start_job", lambda target=None: target() or True)  # exécution immédiate
+    web._job["running"] = True
+    client.post("/send-all", data={"subject_5": "Objet modifié", "body_5": "Corps modifié"})
+    assert sorted(m["To"] for m in sent) == ["a@dupont.fr", "b@bru.fr"]
+    assert any(m["Subject"] == "Objet modifié" for m in sent)
+    assert "2 mail(s) envoyé(s)." == web._job["log"]
+
+
+def test_send_all_respects_daily_quota(client, monkeypatch):
+    sent = []
+    monkeypatch.setattr(web.mailer, "send", sent.append)
+    monkeypatch.setenv("SEND_SPACING", "0,0")
+    monkeypatch.setenv("DAILY_LIMIT", "1")
+    con = db.connect()
+    con.execute("UPDATE companies SET email_source='site'")
+    con.execute("INSERT INTO companies(siren,nom,email,email_source,status,contacted_at) VALUES('6','A','a@a.fr','site','drafted','2026-01-03')")
+    con.commit()
+    web._job["running"] = True
+    web._run_send_all()
+    assert len(sent) == 1
+
+
+def test_inbox_button(client, monkeypatch):
+    monkeypatch.setattr(web.inbox, "check", lambda con: {"replied": 2, "stop": 1, "bounced": 0})
+    login(client)
+    client.post("/inbox")
+    assert "2 réponse(s), 1 désinscription(s)" in client.get("/?tab=sent").data.decode()

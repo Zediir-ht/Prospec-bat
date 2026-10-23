@@ -82,3 +82,7 @@ La recherche teste `WORKERS` (20) entreprises en parallèle : la lecture des sit
 ## Recherche par enseigne et par métier
 - Chaque entreprise est cherchée sous son **enseigne** (« Plomberie du Rouergue ») puis sous son nom légal (« SARL DUPONT ET FILS »).
 - `python -m prospec.cli discover -n 20` (lancé aussi par la collecte et « Préparer les mails du jour ») cherche « métier + commune » (« plomberie et chauffage Rodez ») et rattache les sites trouvés aux entreprises SIRENE : par le **SIREN/SIRET** affiché dans les mentions légales (certain), sinon par le nom dans l'adresse du site s'il ne désigne qu'une entreprise de la commune.
+
+## Réponses et envoi groupé
+- **Vérifier les réponses** (onglet Envoyés, et automatiquement à chaque « Préparer les mails du jour ») lit la boîte Gmail en lecture seule (rien n'est marqué comme lu) : réponse → « a répondu » avec un extrait, STOP / « pas intéressé » → désinscription, mail revenu en erreur → adresse invalide. Les messages d'absence sont ignorés. Une réponse est reconnue par le fil du mail envoyé, l'adresse de l'expéditeur ou son nom de domaine. Plus de relance pour ceux qui ont répondu. En ligne de commande : `python -m prospec.cli inbox`.
+- **Tout envoyer** (onglet À valider) envoie tous les mails prêts, avec les modifications à l'écran, espacés de `SEND_SPACING` secondes, dans la limite du quota quotidien `DAILY_LIMIT`.

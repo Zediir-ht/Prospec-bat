@@ -123,7 +123,10 @@ def parse_batch(text, allowed):
     return ok, errors
 
 
-def signature():
+SOURCES = {"site": "sur le site web de votre entreprise", "osm": "dans OpenStreetMap, où elle est publiée pour votre entreprise"}
+
+
+def signature(source=None):
     s = config.sender()
     lines = ["", "Cordialement,", f"{s['prenom']} {s['nom']}", f"Création de sites web - {s['site']}"]
     if s["tel"]:
@@ -131,15 +134,16 @@ def signature():
     lines += [
         "",
         "--",
-        "Vous recevez ce message à titre professionnel. Si ce n'est pas pertinent pour vous, "
-        "répondez simplement STOP : je ne vous écrirai plus.",
+        "Vous recevez ce message à titre professionnel"
+        + (f" : j'ai trouvé votre adresse {SOURCES[source]}." if source in SOURCES else ".")
+        + " Si ce n'est pas pertinent pour vous, répondez simplement STOP : je ne vous écrirai plus.",
     ]
     if s["legal"]:
         lines.append(s["legal"])
     return "\n".join(lines)
 
 
-def build_message(to, subject, body):
+def build_message(to, subject, body, source=None):
     s = config.sender()
     m = EmailMessage()
     m["From"] = f"{s['prenom']} {s['nom']} <{s['email']}>"
@@ -148,7 +152,7 @@ def build_message(to, subject, body):
     m["Date"] = formatdate(localtime=True)
     m["Message-ID"] = make_msgid(domain=s["email"].split("@")[-1])
     m["List-Unsubscribe"] = f"<mailto:{s['email']}?subject=STOP>"
-    m.set_content(body + "\n" + signature())
+    m.set_content(body + "\n" + signature(source))
     return m
 
 

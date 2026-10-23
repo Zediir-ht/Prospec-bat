@@ -171,7 +171,7 @@ def draft_action(siren):
         if act == "send":
             if db.is_suppressed(con, row["email"]):
                 abort(409, "Adresse désinscrite")
-            mailer.send(mailer.build_message(row["email"], subject, body))
+            mailer.send(mailer.build_message(row["email"], subject, body, row["email_source"]))
             con.execute("UPDATE companies SET status='sent', contacted_at=? WHERE siren=?", (db.now(), siren))
     con.commit()
     return redirect(url_for("index", tab="drafts"))
@@ -219,6 +219,11 @@ def _run_daily():
         if cli.pending(con) < cli.target():  # sinon : déjà assez de mails, aucune recherche
             _job["log"] = "Récupération des entreprises…"
             cli.cmd_source(con, A)
+            _job["log"] = "Emails publiés sur OpenStreetMap…"
+            try:
+                cli.cmd_osm(con, A)
+            except Exception as exc:  # source facultative : on continue sans elle
+                print(f"OpenStreetMap indisponible : {exc}")
             _job["log"] = "Recherche d'adresses email…"
             cli.cmd_qualify(con, A)
         _job["log"] = "Rédaction des mails…"

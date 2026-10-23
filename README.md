@@ -65,3 +65,10 @@ Chaque mail est écrit par Claude pour l'entreprise visée (activité, commune, 
 - **Avec une clé API** (`ANTHROPIC_API_KEY`) : « Préparer les mails du jour » écrit les mails tout seul.
 - **Sans clé** : onglet **À rédiger** → *Copier la demande* → coller dans Claude (claude.ai) → coller sa réponse JSON → *Importer*. Les mails arrivent dans **À valider**.
 Tout mail mentionnant un prix est refusé automatiquement.
+
+## Sources d'adresses email
+1. **Site de l'entreprise** : pages d'accueil, contact, mentions légales ; détecte aussi les adresses masquées (`[at]`, `&#64;`, `%40`, protection Cloudflare).
+2. **OpenStreetMap** (`python -m prospec.cli osm`) : adresses que les entreprises publient elles-mêmes, licence ODbL. Appariées à la base SIRENE par nom et code postal.
+3. **Google Places** (facultatif, `GOOGLE_PLACES_KEY`) : trouve le site officiel de façon fiable.
+Chaque mail indique d'où vient l'adresse (information exigée par le RGPD, art. 14) et propose de répondre STOP.
+Non utilisé volontairement : annuaires dont les conditions interdisent l'extraction (Pages Jaunes, réseaux sociaux), listes achetées d'origine inconnue, adresses devinées (`info@`, `contact@`).

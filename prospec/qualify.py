@@ -1,10 +1,13 @@
 """Détecte si une entreprise a un site web, son état, et une adresse email de contact."""
+import html as htmllib
 import re
 import unicodedata
 from datetime import datetime
-from urllib.parse import parse_qs, quote_plus, urlparse
+from urllib.parse import parse_qs, quote_plus, unquote, urlparse
 
 import requests
+
+from . import config
 
 UA = {"User-Agent": "Mozilla/5.0 (compatible; prospec-bat/1.0)"}
 
@@ -56,9 +59,29 @@ def search_urls(nom, commune, session):
     return urls
 
 
+def decode_cloudflare(html):
+    """Décode les adresses masquées par Cloudflare (data-cfemail)."""
+    out = []
+    for h in re.findall(r'data-cfemail="([0-9a-fA-F]+)"', html):
+        try:
+            key = int(h[:2], 16)
+            out.append("".join(chr(int(h[i:i + 2], 16) ^ key) for i in range(2, len(h), 2)))
+        except ValueError:
+            pass
+    return " ".join(out)
+
+
+def deobfuscate(text):
+    """Remet en clair « nom [at] domaine [dot] fr », « nom (arobase) domaine.fr », « nom&#64;domaine.fr »."""
+    text = unquote(htmllib.unescape(text))
+    text = re.sub(r"\s*[\[\(\{]\s*(?:at|arobase)\s*[\]\)\}]\s*", "@", text, flags=re.I)
+    text = re.sub(r"\s*[\[\(\{]\s*(?:dot|point)\s*[\]\)\}]\s*", ".", text, flags=re.I)
+    return text
+
+
 def extract_emails(html):
     found = []
-    for e in EMAIL_RE.findall(html):
+    for e in EMAIL_RE.findall(deobfuscate(html) + " " + decode_cloudflare(html)):
         e = e.lower().rstrip(".")
         if not any(b in e for b in BAD_EMAIL_PARTS) and e not in found:
             found.append(e)
@@ -91,11 +114,33 @@ def fetch(url, session):
     return r.url, r.text
 
 
+def places_site(nom, commune, session):
+    """Site web de l'entreprise d'après Google Places (clé GOOGLE_PLACES_KEY). Retourne l'URL ou None."""
+    r = session.post(
+        "https://places.googleapis.com/v1/places:searchText",
+        headers={"X-Goog-Api-Key": config.env("GOOGLE_PLACES_KEY"),
+                 "X-Goog-FieldMask": "places.displayName,places.websiteUri"},
+        json={"textQuery": f"{nom} {commune}", "languageCode": "fr", "regionCode": "FR"},
+        timeout=20,
+    )
+    r.raise_for_status()
+    tokens = name_tokens(nom)
+    for place in r.json().get("places", []):
+        label = norm(place.get("displayName", {}).get("text", ""))
+        uri = place.get("websiteUri")
+        if uri and any(t in label for t in tokens) and not any(d in uri for d in DIRECTORIES):
+            return f"{urlparse(uri).scheme}://{urlparse(uri).netloc}"
+    return None
+
+
 def qualify_company(row, session=None):
     """row: dict avec nom, commune. Retourne dict site_url, site_status, site_issues, email."""
     session = session or requests.Session()
     try:
-        site = pick_site(row["nom"], search_urls(row["nom"], row["commune"], session))
+        if config.env("GOOGLE_PLACES_KEY"):
+            site = places_site(row["nom"], row["commune"], session)
+        else:
+            site = pick_site(row["nom"], search_urls(row["nom"], row["commune"], session))
     except requests.RequestException:
         return {"site_url": None, "site_status": "unknown", "site_issues": "", "email": None}
     if not site:

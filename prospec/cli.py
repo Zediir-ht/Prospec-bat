@@ -1,14 +1,19 @@
-"""Usage : python -m prospec.cli {source|qualify|run|suppress EMAIL|stats}"""
+"""Usage : python -m prospec.cli {source|osm|qualify|run|suppress EMAIL|stats}"""
 import argparse
 import random
 import sys
 import time
 
-from . import config, db, mailer, qualify, sourcing
+from . import config, db, mailer, osm, qualify, sourcing
 
 
 def cmd_source(con, _):
     print(f"{sourcing.source(con)} nouvelles entreprises ajoutées")
+
+
+def cmd_osm(con, _):
+    print(f"{osm.refresh(con)} lieux OpenStreetMap avec email récupérés")
+    print(f"{osm.match(con)} entreprises appariées")
 
 
 def target():
@@ -30,6 +35,12 @@ def cmd_qualify(con, args):
             print(f"Objectif atteint : {pending(con)} mails exploitables.")
             break
         res = qualify.qualify_company(dict(row))
+        if res["email"]:
+            res["email_source"] = "site"
+        elif row["email"]:  # email déjà connu par OpenStreetMap
+            res["email"], res["email_source"] = row["email"], row["email_source"] or "osm"
+        else:
+            res["email_source"] = None
         if res["site_status"] == "ok":
             status = "skip"  # site correct : hors cible
         elif res["site_status"] == "unknown":
@@ -41,8 +52,8 @@ def cmd_qualify(con, args):
         else:
             status = "no_email"  # cible pertinente mais aucun email public trouvé : ignorée
         con.execute(
-            "UPDATE companies SET site_url=?, site_status=?, site_issues=?, email=?, status=? WHERE siren=?",
-            (res["site_url"], res["site_status"], res["site_issues"], res["email"], status, row["siren"]),
+            "UPDATE companies SET site_url=?, site_status=?, site_issues=?, email=?, email_source=?, status=? WHERE siren=?",
+            (res["site_url"], res["site_status"], res["site_issues"], res["email"], res["email_source"], status, row["siren"]),
         )
         con.commit()
         print(f"{row['nom']} ({row['commune']}) -> {res['site_status']} / {res['email']} / {status}")
@@ -51,7 +62,7 @@ def cmd_qualify(con, args):
 
 def contact(con, row, subject, body, mode, followup=False):
     if mode != "review":  # en mode review, l'envoi se fait depuis le dashboard
-        mailer.deliver(mailer.build_message(row["email"], subject, body), mode)
+        mailer.deliver(mailer.build_message(row["email"], subject, body, row["email_source"]), mode)
     ts = db.now()
     if followup:
         con.execute("UPDATE companies SET status='followed_up', followup_at=? WHERE siren=?", (ts, row["siren"]))
@@ -124,13 +135,14 @@ def main():
     p = argparse.ArgumentParser(prog="prospec")
     sub = p.add_subparsers(dest="cmd", required=True)
     sub.add_parser("source")
+    sub.add_parser("osm")
     q = sub.add_parser("qualify"); q.add_argument("-n", type=int, default=150)
     sub.add_parser("run")
     s = sub.add_parser("suppress"); s.add_argument("email")
     sub.add_parser("stats")
     args = p.parse_args()
     con = db.connect()
-    {"source": cmd_source, "qualify": cmd_qualify, "run": cmd_run, "suppress": cmd_suppress,
+    {"source": cmd_source, "osm": cmd_osm, "qualify": cmd_qualify, "run": cmd_run, "suppress": cmd_suppress,
      "stats": cmd_stats}[args.cmd](con, args)
 
 

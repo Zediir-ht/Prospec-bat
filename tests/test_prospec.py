@@ -138,3 +138,61 @@ def test_claude_mail_via_http(monkeypatch):
     assert sent["headers"]["x-api-key"] == "k" and "DUPONT" in sent["json"]["messages"][0]["content"]
     monkeypatch.delenv("ANTHROPIC_API_KEY")
     assert mailer.compose(c) is None
+
+
+def _cf(email, key=0x55):
+    return f"{key:02x}" + "".join(f"{ord(ch) ^ key:02x}" for ch in email)
+
+
+def test_extract_emails_obfuscated():
+    html = (f'<a class="__cf_email__" data-cfemail="{_cf("contact@dupont-plomberie.fr")}">[email protected]</a> '
+            'ou écrivez à jean [at] martin-toiture [dot] fr, '
+            '<a href="mailto:info%40vidal-maconnerie.fr">mail</a>, accueil&#64;hotel-rouergue.fr')
+    found = qualify.extract_emails(html)
+    assert {"contact@dupont-plomberie.fr", "jean@martin-toiture.fr", "info@vidal-maconnerie.fr",
+            "accueil@hotel-rouergue.fr"} <= set(found)
+
+
+def test_osm_parse_and_match(tmp_path):
+    from prospec import osm
+
+    el = {"type": "node", "id": 42, "tags": {"name": "Boulangerie Calmels", "contact:email": "Calmels.Pain@orange.fr; autre@x.fr",
+                                              "addr:postcode": "12100", "addr:city": "Millau"}}
+    place = osm.parse_element(el, "12")
+    assert place["email"] == "calmels.pain@orange.fr" and place["osm_id"] == "node/42"
+    assert osm.parse_element({"type": "node", "id": 1, "tags": {"name": "X"}}, "12") is None
+
+    con = db.connect(tmp_path / "t.db")
+    con.execute("INSERT INTO osm_places VALUES (:osm_id,:dept,:name,:email,:website,:city,:postcode)", place)
+    for siren, nom, cp in (("1", "SARL CALMELS", "12100"), ("2", "CALMELS PLOMBERIE", "48000"), ("3", "BOULANGERIE DURAND", "12100")):
+        con.execute("INSERT INTO companies(siren,nom,commune,code_postal,status) VALUES(?,?,?,?,'new')", (siren, nom, "Millau", cp))
+    con.commit()
+    assert osm.match(con) == 1
+    row = con.execute("SELECT email, email_source FROM companies WHERE siren='1'").fetchone()
+    assert tuple(row) == ("calmels.pain@orange.fr", "osm")
+    assert con.execute("SELECT email FROM companies WHERE siren IN ('2','3') AND email IS NOT NULL").fetchone() is None
+
+
+def test_signature_mentions_email_source():
+    for source, expected in (("site", "site web de votre entreprise"), ("osm", "OpenStreetMap")):
+        assert expected in mailer.build_message("a@b.fr", "S", "B", source).get_content()
+    assert "trouvé votre adresse" not in mailer.build_message("a@b.fr", "S", "B").get_content()
+
+
+def test_qualify_keeps_osm_email(tmp_path, monkeypatch):
+    from prospec import cli, qualify
+
+    monkeypatch.setattr(cli.time, "sleep", lambda s: None)
+    con = db.connect(tmp_path / "t.db")
+    con.execute("INSERT INTO companies(siren,nom,commune,code_postal,email,email_source,status) "
+                "VALUES('1','CALMELS','Millau','12100','c@calmels.fr','osm','new')")
+    con.commit()
+    monkeypatch.setattr(qualify, "qualify_company",
+                        lambda row, session=None: {"site_url": None, "site_status": "none", "site_issues": "", "email": None})
+
+    class A:
+        n = 5
+
+    cli.cmd_qualify(con, A)
+    row = con.execute("SELECT status, email, email_source FROM companies").fetchone()
+    assert tuple(row) == ("qualified", "c@calmels.fr", "osm")

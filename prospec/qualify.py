@@ -1,6 +1,8 @@
 """Détecte si une entreprise a un site web, son état, et une adresse email de contact."""
 import html as htmllib
 import re
+import threading
+import time
 import unicodedata
 from datetime import datetime
 from urllib.parse import parse_qs, quote_plus, unquote, urlparse
@@ -47,9 +49,43 @@ def pick_site(nom, urls):
     return None
 
 
+_local = threading.local()
+_search = {"lock": threading.Lock(), "last": 0.0, "penalty": 0.0}
+
+
+def thread_session():
+    """Une session HTTP par fil de recherche (requests.Session n'est pas partageable entre threads)."""
+    if not hasattr(_local, "session"):
+        _local.session = requests.Session()
+    return _local.session
+
+
+def throttle_search():
+    """Espace les recherches web de tous les fils : SEARCH_INTERVAL secondes, davantage après un refus."""
+    interval = float(config.env("SEARCH_INTERVAL", "1.0")) + _search["penalty"]
+    with _search["lock"]:
+        wait = _search["last"] + interval - time.monotonic()
+        if wait > 0:
+            time.sleep(wait)
+        _search["last"] = time.monotonic()
+
+
+def search_feedback(ok):
+    """Ralentit automatiquement si le moteur refuse des requêtes, réaccélère quand il répond."""
+    with _search["lock"]:
+        _search["penalty"] = max(0.0, _search["penalty"] - 0.5) if ok else min(30.0, _search["penalty"] * 2 + 2)
+
+
 def search_urls(nom, commune, session):
     q = quote_plus(f"{nom} {commune}")
-    r = session.get(f"https://html.duckduckgo.com/html/?q={q}", headers=UA, timeout=20)
+    throttle_search()
+    try:
+        r = session.get(f"https://html.duckduckgo.com/html/?q={q}", headers=UA, timeout=20)
+        r.raise_for_status()
+    except requests.RequestException:
+        search_feedback(False)
+        raise
+    search_feedback(True)
     urls = []
     for m in re.finditer(r'class="result__a"[^>]*href="([^"]+)"', r.text):
         href = m.group(1)
@@ -109,7 +145,7 @@ def best_email(emails, domain):
 
 
 def fetch(url, session):
-    r = session.get(url, headers=UA, timeout=15, allow_redirects=True)
+    r = session.get(url, headers=UA, timeout=10, allow_redirects=True)
     r.raise_for_status()
     return r.url, r.text
 
@@ -135,7 +171,7 @@ def places_site(nom, commune, session):
 
 def qualify_company(row, session=None):
     """row: dict avec nom, commune. Retourne dict site_url, site_status, site_issues, email."""
-    session = session or requests.Session()
+    session = session or thread_session()
     try:
         if row.get("site_url"):  # déjà connu (OpenStreetMap ou recherche précédente) : pas de recherche web
             site = row["site_url"]

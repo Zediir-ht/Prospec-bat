@@ -113,7 +113,7 @@ def test_qualify_stops_at_target(tmp_path, monkeypatch):
     class A:
         n = 50
 
-    cli.cmd_qualify(con, A)
+    cli.qualify_batch(con, A.n, workers=1)
     assert len(calls) == 3 and cli.pending(con) == 3
     cli.cmd_qualify(con, A)                      # objectif déjà atteint : aucune nouvelle recherche
     assert len(calls) == 3
@@ -276,3 +276,64 @@ def test_collect_goes_beyond_daily_target(tmp_path, monkeypatch):
     con.execute("UPDATE companies SET status='new'")
     con.commit()
     assert cli.cmd_collect(con, A, stop=lambda: next(stops, True))[0] <= 1
+
+
+def test_qualify_runs_in_parallel(tmp_path, monkeypatch):
+    import threading
+    import time
+    from prospec import cli
+
+    monkeypatch.setenv("DAILY_LIMIT", "1000")
+    con = db.connect(tmp_path / "t.db")
+    for i in range(20):
+        con.execute("INSERT INTO companies(siren,nom,commune,code_postal) VALUES(?,?,?,?)", (str(i), f"E{i}", "Rodez", "12000"))
+    con.commit()
+    active, peak, lock = [0], [0], threading.Lock()
+
+    def slow(row, session=None):
+        with lock:
+            active[0] += 1
+            peak[0] = max(peak[0], active[0])
+        time.sleep(0.2)
+        with lock:
+            active[0] -= 1
+        if row["siren"] == "5":
+            raise RuntimeError("site en panne")
+        return {"site_url": None, "site_status": "none", "site_issues": "", "email": f"c{row['siren']}@e{row['siren']}.fr"}
+
+    monkeypatch.setattr(qualify, "qualify_company", slow)
+    start = time.monotonic()
+    tested, found = cli.qualify_batch(con, 100, workers=10)
+    assert time.monotonic() - start < 1.5          # 20 × 0,2 s en séquentiel = 4 s
+    assert peak[0] == 10 and (tested, found) == (19, 19)
+    assert con.execute("SELECT COUNT(*) FROM companies WHERE status='qualified'").fetchone()[0] == 19
+
+
+def test_parallel_stops_near_target(tmp_path, monkeypatch):
+    from prospec import cli
+
+    monkeypatch.setenv("DAILY_LIMIT", "10")
+    con = db.connect(tmp_path / "t.db")
+    for i in range(100):
+        con.execute("INSERT INTO companies(siren,nom,commune,code_postal) VALUES(?,?,?,?)", (str(i), f"E{i}", "Rodez", "12000"))
+    con.commit()
+    monkeypatch.setattr(qualify, "qualify_company", lambda row, session=None: {
+        "site_url": None, "site_status": "none", "site_issues": "", "email": f"c{row['siren']}@e{row['siren']}.fr"})
+    tested, _ = cli.qualify_batch(con, 100, workers=5)
+    assert 10 <= tested <= 15                     # au plus les recherches déjà lancées en plus
+
+
+def test_search_throttle_spaces_requests(monkeypatch):
+    import time
+
+    monkeypatch.setenv("SEARCH_INTERVAL", "0.1")
+    qualify._search.update(last=0.0, penalty=0.0)
+    start = time.monotonic()
+    for _ in range(4):
+        qualify.throttle_search()
+    assert time.monotonic() - start >= 0.3
+    qualify.search_feedback(False)
+    assert qualify._search["penalty"] == 2.0
+    qualify.search_feedback(True)
+    assert qualify._search["penalty"] == 1.5
+    qualify._search["penalty"] = 0.0

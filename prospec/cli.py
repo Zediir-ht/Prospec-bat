@@ -3,6 +3,7 @@ import argparse
 import random
 import sys
 import time
+from concurrent.futures import FIRST_COMPLETED, ThreadPoolExecutor, wait
 
 from . import config, db, mailer, osm, qualify, sourcing
 
@@ -26,46 +27,78 @@ def pending(con):
     return len(next_to_write(con)) + drafted
 
 
-def qualify_batch(con, limit, until_target=True, stop=None, log=None, base=(0, 0)):
-    """Teste jusqu'à `limit` entreprises. Avec until_target, s'arrête dès que `target()` mails exploitables
-    sont réunis. `stop()` permet d'interrompre, `log(texte)` de suivre la progression.
-    Retourne (entreprises testées, adresses trouvées)."""
-    rows = con.execute("SELECT * FROM companies WHERE status='new' ORDER BY (code_postal LIKE '12%') DESC, RANDOM() LIMIT ?", (limit,)).fetchall()
+def apply_result(con, row, res):
+    """Enregistre le résultat de la recherche pour une entreprise. Retourne le statut, ou None (à retenter)."""
+    if res["email"]:
+        res["email_source"] = "site"
+    elif row["email"]:  # email déjà connu par OpenStreetMap
+        res["email"], res["email_source"] = row["email"], row["email_source"] or "osm"
+    else:
+        res["email_source"] = None
+    if res["site_status"] == "ok":
+        status = "skip"  # site correct : hors cible
+    elif res["site_status"] == "unknown":
+        return None  # recherche impossible pour l'instant : réessayé plus tard
+    elif res["email"] and row["nature_juridique"] == "1000" and res["email"].split("@")[-1] in config.FREE_MAIL_DOMAINS:
+        status = "skip"  # entrepreneur individuel : pas de prospection sur une messagerie personnelle
+    elif res["email"]:
+        status = "qualified"
+    else:
+        status = "no_email"  # cible pertinente mais aucun email public trouvé : ignorée
+    con.execute(
+        "UPDATE companies SET site_url=?, site_status=?, site_issues=?, email=?, email_source=?, status=? WHERE siren=?",
+        (res["site_url"], res["site_status"], res["site_issues"], res["email"], res["email_source"], status, row["siren"]),
+    )
+    con.commit()
+    print(f"{row['nom']} ({row['commune']}) -> {res['site_status']} / {res['email']} / {status}")
+    return status
+
+
+def qualify_batch(con, limit, until_target=True, stop=None, log=None, base=(0, 0), workers=None):
+    """Teste jusqu'à `limit` entreprises avec `workers` recherches en parallèle (WORKERS, 10 par défaut).
+    Avec until_target, s'arrête dès que `target()` mails exploitables sont réunis. `stop()` permet
+    d'interrompre, `log(texte)` de suivre la progression. Retourne (entreprises testées, adresses trouvées).
+    Les fils ne font que du réseau ; la base n'est écrite que par ce fil-ci."""
+    workers = workers or int(config.env("WORKERS", "10"))
+    rows = iter(con.execute(
+        "SELECT * FROM companies WHERE status='new' ORDER BY (code_postal LIKE '12%') DESC, RANDOM() LIMIT ?", (limit,)
+    ).fetchall())
     tested = found = 0
-    for row in rows:
+
+    def finished():
         if until_target and pending(con) >= target():
             print(f"Objectif atteint : {pending(con)} mails exploitables.")
-            break
-        if stop and stop():
-            break
-        res = qualify.qualify_company(dict(row))
-        tested += 1
-        if res["email"]:
-            res["email_source"] = "site"
-        elif row["email"]:  # email déjà connu par OpenStreetMap
-            res["email"], res["email_source"] = row["email"], row["email_source"] or "osm"
-        else:
-            res["email_source"] = None
-        if res["site_status"] == "ok":
-            status = "skip"  # site correct : hors cible
-        elif res["site_status"] == "unknown":
-            continue  # réessayé plus tard
-        elif res["email"] and row["nature_juridique"] == "1000" and res["email"].split("@")[-1] in config.FREE_MAIL_DOMAINS:
-            status = "skip"  # entrepreneur individuel : pas de prospection sur une messagerie personnelle
-        elif res["email"]:
-            status = "qualified"
-            found += 1
-        else:
-            status = "no_email"  # cible pertinente mais aucun email public trouvé : ignorée
-        con.execute(
-            "UPDATE companies SET site_url=?, site_status=?, site_issues=?, email=?, email_source=?, status=? WHERE siren=?",
-            (res["site_url"], res["site_status"], res["site_issues"], res["email"], res["email_source"], status, row["siren"]),
-        )
-        con.commit()
-        print(f"{row['nom']} ({row['commune']}) -> {res['site_status']} / {res['email']} / {status}")
-        if log:
-            log(f"{base[0] + tested} entreprises testées, {base[1] + found} adresses trouvées")
-        time.sleep(random.uniform(1, 3))
+            return True
+        return bool(stop and stop())
+
+    with ThreadPoolExecutor(max_workers=workers) as pool:
+        running = {}
+
+        def submit_next():
+            row = next(rows, None)
+            if row is not None:
+                running[pool.submit(qualify.qualify_company, dict(row))] = row
+
+        if not finished():
+            for _ in range(workers):
+                submit_next()
+        while running:
+            done, _ = wait(running, return_when=FIRST_COMPLETED)
+            for fut in done:
+                row = running.pop(fut)
+                try:
+                    res = fut.result()
+                except Exception as exc:  # une entreprise en erreur ne bloque pas les autres
+                    print(f"  ! {row['nom']} : {exc}")
+                    continue
+                tested += 1
+                if apply_result(con, row, res) == "qualified":
+                    found += 1
+                if log:
+                    log(f"{base[0] + tested} entreprises testées, {base[1] + found} adresses trouvées")
+            if not finished():  # sinon : on laisse finir les recherches en cours sans en lancer d'autres
+                for _ in done:
+                    submit_next()
     return tested, found
 
 

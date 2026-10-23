@@ -11,9 +11,24 @@ def cmd_source(con, _):
     print(f"{sourcing.source(con)} nouvelles entreprises ajoutées")
 
 
+def target():
+    return int(config.env("DAILY_LIMIT", "10"))
+
+
+def pending(con):
+    """Mails exploitables en attente : entreprises avec email à rédiger + brouillons à valider."""
+    drafted = con.execute("SELECT COUNT(*) FROM companies WHERE status='drafted'").fetchone()[0]
+    return len(next_to_write(con)) + drafted
+
+
 def cmd_qualify(con, args):
+    """Teste des entreprises une à une et s'arrête dès que `target()` mails exploitables sont réunis
+    (args.n = nombre maximum d'entreprises testées)."""
     rows = con.execute("SELECT * FROM companies WHERE status='new' ORDER BY (code_postal LIKE '12%') DESC, RANDOM() LIMIT ?", (args.n,)).fetchall()
     for row in rows:
+        if pending(con) >= target():
+            print(f"Objectif atteint : {pending(con)} mails exploitables.")
+            break
         res = qualify.qualify_company(dict(row))
         if res["site_status"] == "ok":
             status = "skip"  # site correct : hors cible
@@ -109,7 +124,7 @@ def main():
     p = argparse.ArgumentParser(prog="prospec")
     sub = p.add_subparsers(dest="cmd", required=True)
     sub.add_parser("source")
-    q = sub.add_parser("qualify"); q.add_argument("-n", type=int, default=30)
+    q = sub.add_parser("qualify"); q.add_argument("-n", type=int, default=150)
     sub.add_parser("run")
     s = sub.add_parser("suppress"); s.add_argument("email")
     sub.add_parser("stats")

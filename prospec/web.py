@@ -213,13 +213,14 @@ def stop():
 
 def _run_daily():
     class A:  # arguments équivalents à la ligne de commande
-        n = int(config.env("QUALIFY_PER_DAY", "30"))
+        n = int(config.env("QUALIFY_PER_DAY", "150"))
     con = db.connect()
     try:
-        _job["log"] = "Récupération des entreprises…"
-        cli.cmd_source(con, A)
-        _job["log"] = "Qualification des entreprises…"
-        cli.cmd_qualify(con, A)
+        if cli.pending(con) < cli.target():  # sinon : déjà assez de mails, aucune recherche
+            _job["log"] = "Récupération des entreprises…"
+            cli.cmd_source(con, A)
+            _job["log"] = "Recherche d'adresses email…"
+            cli.cmd_qualify(con, A)
         _job["log"] = "Rédaction des mails…"
         cli.cmd_run(con, A)
         _job["log"] = ("Terminé : voir « À valider »." if config.env("ANTHROPIC_API_KEY")

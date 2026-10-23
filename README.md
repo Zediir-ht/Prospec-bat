@@ -58,7 +58,7 @@ Le script installe les dépendances, pose 3 questions (mot de passe d'applicatio
 ## Réglages (.env)
 - `DEPARTEMENTS` : par défaut `12,48,15,46,81,82` (Aveyron en priorité). Ajouter `30`, `34` pour élargir.
 - `SECTEURS` : par défaut `batiment,alimentaire,restauration,artisanat,services,commerce`.
-Les entreprises sont récupérées progressivement : l'Aveyron en entier au premier lancement, puis quelques départements voisins à chaque « Préparer les mails du jour ».
+La recherche s'arrête dès que `DAILY_LIMIT` (10) mails exploitables sont réunis (adresses trouvées + brouillons en attente) : rien n'est cherché de plus tant que vous n'avez pas écoulé ceux-là. Les entreprises sont téléchargées au fur et à mesure (Aveyron d'abord), pas toutes d'un coup. `QUALIFY_PER_DAY` (150) limite le nombre d'entreprises testées par recherche.
 
 ## Rédaction des mails par Claude
 Chaque mail est écrit par Claude pour l'entreprise visée (activité, commune, constat sur son site). Il n'y a pas de modèle fixe.

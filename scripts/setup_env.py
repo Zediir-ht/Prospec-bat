@@ -36,7 +36,7 @@ values = {
     "DASHBOARD_PASSWORD": password,
     "DASHBOARD_SECRET": secrets.token_hex(24),
     "CRON_TOKEN": secrets.token_hex(16),
-    "QUALIFY_PER_DAY": "30",
+    "QUALIFY_PER_DAY": "150",
 }
 env_path.write_text("\n".join(f"{k}={v}" for k, v in values.items()) + "\n", encoding="utf-8")
 env_path.chmod(0o600)

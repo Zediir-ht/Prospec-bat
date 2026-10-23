@@ -70,10 +70,10 @@ def test_metier_for_other_sectors():
     assert sourcing.metier_for("43.91A") == "couverture et charpente"
 
 
-def test_source_is_incremental_and_aveyron_first(tmp_path, monkeypatch):
+def test_source_stops_when_pool_is_enough(tmp_path, monkeypatch):
     from prospec import config
     monkeypatch.setattr(config, "DEPARTEMENTS", ["12", "48"])
-    monkeypatch.setattr(config, "NAF_CODES", ["10.71C", "56.10A"])
+    monkeypatch.setattr(config, "NAF_CODES", ["10.71C", "56.10A", "47.76Z"])
     calls = []
 
     def fake_fetch(naf, dept, session=None, max_pages=40):
@@ -83,10 +83,38 @@ def test_source_is_incremental_and_aveyron_first(tmp_path, monkeypatch):
 
     monkeypatch.setattr(sourcing, "fetch_naf", fake_fetch)
     con = db.connect(tmp_path / "t.db")
-    assert sourcing.source(con, max_other=1) == 3
-    assert calls == [("12", "10.71C"), ("12", "56.10A"), ("48", "10.71C")]
-    assert sourcing.source(con, max_other=1) == 1 and calls[-1] == ("48", "56.10A")
-    assert sourcing.source(con) == 0
+    assert sourcing.source(con, min_pool=2) == 2
+    assert [d for d, _ in calls] == ["12", "12"]          # Aveyron d'abord, arrêt dès 2 entreprises
+    assert sourcing.source(con, min_pool=2) == 0           # vivier déjà suffisant : rien de plus
+    assert sourcing.source(con, min_pool=10) == 4          # reprend où on s'est arrêté, sans doublon
+    assert len(calls) == 6
+
+
+def test_qualify_stops_at_target(tmp_path, monkeypatch):
+    from prospec import cli, qualify
+
+    monkeypatch.setenv("DAILY_LIMIT", "3")
+    monkeypatch.setattr(cli.time, "sleep", lambda s: None)
+    con = db.connect(tmp_path / "t.db")
+    for i in range(10):
+        con.execute("INSERT INTO companies(siren,nom,commune,code_postal,naf,metier) VALUES(?,?,?,?,?,?)",
+                    (str(i), f"E{i}", "Rodez", "12000", "10.71C", "boulangerie"))
+    con.commit()
+    calls = []
+
+    def fake(row, session=None):
+        calls.append(row["siren"])
+        return {"site_url": None, "site_status": "none", "site_issues": "", "email": f"contact{row['siren']}@e{row['siren']}.fr"}
+
+    monkeypatch.setattr(qualify, "qualify_company", fake)
+
+    class A:
+        n = 50
+
+    cli.cmd_qualify(con, A)
+    assert len(calls) == 3 and cli.pending(con) == 3
+    cli.cmd_qualify(con, A)                      # objectif déjà atteint : aucune nouvelle recherche
+    assert len(calls) == 3
 
 
 def test_claude_mail_via_http(monkeypatch):

@@ -1,4 +1,5 @@
 """Récupère les entreprises du bâtiment de l'Aveyron via l'API officielle Recherche d'entreprises."""
+import random
 import time
 
 import requests
@@ -59,19 +60,21 @@ def fetch_naf(naf, dept, session=None, max_pages=40):
         time.sleep(0.25)  # limite API : ~7 requêtes/s
 
 
-def source(con, session=None, max_other=30):
-    """Récupère les entreprises par (département, code NAF). L'Aveyron (1er département) est traité en
-    entier ; les autres départements avancent de `max_other` requêtes par appel, pour ne pas bloquer."""
+def pool_size(con):
+    return con.execute("SELECT COUNT(*) FROM companies WHERE status='new'").fetchone()[0]
+
+
+def source(con, session=None, min_pool=300):
+    """Récupère les entreprises par (département, code NAF) dans un ordre mélangé, Aveyron d'abord, et
+    s'arrête dès que `min_pool` entreprises restent à tester : inutile de tout télécharger."""
     done = {(r["dept"], r["naf"]) for r in con.execute("SELECT dept, naf FROM sourced")}
-    added = other = 0
+    added = 0
     for dept in config.DEPARTEMENTS:
-        for naf in config.NAF_CODES:
-            if (dept, naf) in done:
-                continue
-            if dept != config.DEPARTEMENTS[0]:
-                if other >= max_other:
-                    return added
-                other += 1
+        codes = [n for n in config.NAF_CODES if (dept, n) not in done]
+        random.shuffle(codes)
+        for naf in codes:
+            if pool_size(con) >= min_pool:
+                return added
             for c in fetch_naf(naf, dept, session):
                 cur = con.execute(
                     """INSERT OR IGNORE INTO companies

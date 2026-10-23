@@ -1,6 +1,5 @@
-"""Usage : python -m prospec.cli {source|qualify|run|suppress EMAIL|stats|export-calls}"""
+"""Usage : python -m prospec.cli {source|qualify|run|suppress EMAIL|stats}"""
 import argparse
-import csv
 import random
 import sys
 import time
@@ -23,7 +22,7 @@ def cmd_qualify(con, args):
         elif res["email"]:
             status = "qualified"
         else:
-            status = "to_call"  # cible pertinente mais pas d'email : prospection téléphonique
+            status = "no_email"  # cible pertinente mais aucun email public trouvé : ignorée
         con.execute(
             "UPDATE companies SET site_url=?, site_status=?, site_issues=?, email=?, status=? WHERE siren=?",
             (res["site_url"], res["site_status"], res["site_issues"], res["email"], status, row["siren"]),
@@ -94,17 +93,6 @@ def cmd_stats(con, _):
         print(f"{r['status']:12} {r['n']}")
 
 
-def cmd_export_calls(con, args):
-    rows = con.execute(
-        "SELECT nom, commune, code_postal, metier, dirigeant, site_status, site_issues FROM companies WHERE status='to_call' ORDER BY commune"
-    ).fetchall()
-    with open(args.out, "w", newline="", encoding="utf-8") as f:
-        w = csv.writer(f)
-        w.writerow(rows[0].keys() if rows else ["nom"])
-        w.writerows([tuple(r) for r in rows])
-    print(f"{len(rows)} entreprises à appeler -> {args.out}")
-
-
 def main():
     p = argparse.ArgumentParser(prog="prospec")
     sub = p.add_subparsers(dest="cmd", required=True)
@@ -113,11 +101,10 @@ def main():
     sub.add_parser("run")
     s = sub.add_parser("suppress"); s.add_argument("email")
     sub.add_parser("stats")
-    e = sub.add_parser("export-calls"); e.add_argument("--out", default="data/a_appeler.csv")
     args = p.parse_args()
     con = db.connect()
     {"source": cmd_source, "qualify": cmd_qualify, "run": cmd_run, "suppress": cmd_suppress,
-     "stats": cmd_stats, "export-calls": cmd_export_calls}[args.cmd](con, args)
+     "stats": cmd_stats}[args.cmd](con, args)
 
 
 if __name__ == "__main__":

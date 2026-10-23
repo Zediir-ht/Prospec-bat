@@ -11,7 +11,7 @@ CREATE TABLE IF NOT EXISTS companies (
     site_url TEXT, site_status TEXT,   -- none | ok | outdated | unknown
     site_issues TEXT,
     email TEXT,
-    status TEXT DEFAULT 'new',         -- new | qualified | to_call | drafted | sent | followed_up | replied | refused | skip
+    status TEXT DEFAULT 'new',         -- new | qualified | no_email | drafted | sent | followed_up | replied | refused | skip
     subject TEXT, body TEXT,
     contacted_at TEXT, followup_at TEXT,
     created_at TEXT DEFAULT CURRENT_TIMESTAMP
@@ -26,6 +26,8 @@ def connect(path=None):
     con = sqlite3.connect(path or DB_PATH)
     con.row_factory = sqlite3.Row
     con.executescript(SCHEMA)
+    con.execute("UPDATE companies SET status='no_email' WHERE status='to_call'")
+    con.commit()
     return con
 
 

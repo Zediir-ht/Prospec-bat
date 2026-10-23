@@ -58,19 +58,13 @@ DRAFT = """{% for c in rows %}<div class="card"><b>{{c.nom}}</b> <span class="ta
 <button name="act" value="save" class="btn gh">Enregistrer</button><button name="act" value="skip" class="btn ko">Ignorer</button></div></form></div>
 {% else %}<div class="card mut">Aucun mail en attente. Lancez « Préparer les mails du jour » depuis l'accueil.</div>{% endfor %}"""
 
-CALLS = """{% for c in rows %}<div class="card"><b>{{c.nom}}</b> <span class="tag">{{c.commune}}</span> <span class="tag">{{c.metier}}</span>
-<div class="mut">{{c.dirigeant}} · {{ {'none':'pas de site','outdated':'site à refaire'}.get(c.site_status,c.site_status) }}</div>
-<div class="row"><a class="btn" href="https://www.google.com/search?q={{(c.nom+' '+c.commune+' téléphone')|urlencode}}" target="_blank" rel="noopener">Trouver le numéro</a>
-<form method="post" action="{{url_for('call_done',siren=c.siren)}}"><button class="btn gh">Appelé</button></form></div></div>
-{% else %}<div class="card mut">Personne à appeler pour l'instant.</div>{% endfor %}"""
-
 SENT = """{% for c in rows %}<div class="card"><b>{{c.nom}}</b> <span class="tag">{{c.status}}</span>
 <div class="mut">{{c.email}} · {{c.contacted_at}}</div>
 <form method="post" action="{{url_for('mark',siren=c.siren)}}"><div class="row">
 <button name="s" value="replied" class="btn ok">A répondu</button><button name="s" value="refused" class="btn ko">Refus</button></div></form></div>
 {% else %}<div class="card mut">Rien d'envoyé pour l'instant.</div>{% endfor %}"""
 
-TABS = [("home", "Accueil"), ("drafts", "À valider"), ("sent", "Envoyés"), ("calls", "À appeler")]
+TABS = [("home", "Accueil"), ("drafts", "À valider"), ("sent", "Envoyés")]
 MODES = [("review", "Review (je valide ici)"), ("draft", "Brouillons Gmail"), ("send", "Envoi direct")]
 
 
@@ -126,15 +120,12 @@ def index():
     elif tab == "sent":
         rows = con.execute("SELECT * FROM companies WHERE status IN ('sent','followed_up') ORDER BY contacted_at DESC LIMIT 100").fetchall()
         body = render_template_string(SENT, rows=rows)
-    elif tab == "calls":
-        rows = con.execute("SELECT * FROM companies WHERE status='to_call' ORDER BY commune").fetchall()
-        body = render_template_string(CALLS, rows=rows)
     else:
         tab = "home"
         counts = {r["status"]: r["n"] for r in con.execute("SELECT status, COUNT(*) n FROM companies GROUP BY status")}
         stats = [("entreprises en base", sum(counts.values())), ("à valider", counts.get("drafted", 0)),
                  ("envoyés", counts.get("sent", 0) + counts.get("followed_up", 0)), ("réponses", counts.get("replied", 0)),
-                 ("à appeler", counts.get("to_call", 0)), ("refus", counts.get("refused", 0))]
+                 ("sans email (ignorées)", counts.get("no_email", 0)), ("refus", counts.get("refused", 0))]
         body = render_template_string(HOME, stats=stats, modes=MODES, mode=db.send_mode(con), running=_job["running"], log=_job["log"])
     return page(body, tab, con)
 
@@ -175,14 +166,6 @@ def mark(siren):
         con.execute("UPDATE companies SET status=? WHERE siren=?", (s, siren))
         con.commit()
     return redirect(url_for("index", tab="sent"))
-
-
-@app.post("/call/<siren>")
-def call_done(siren):
-    con = connect()
-    con.execute("UPDATE companies SET status='skip' WHERE siren=?", (siren,))
-    con.commit()
-    return redirect(url_for("index", tab="calls"))
 
 
 @app.post("/stop")

@@ -108,7 +108,7 @@ def qualify_company(row, session=None):
     status, issues = analyse_html(html, final_url)
     emails = extract_emails(html)
     domain = urlparse(final_url).netloc
-    for path in ("/contact", "/mentions-legales"):
+    for path in ("/contact", "/contact.html", "/nous-contacter", "/mentions-legales", "/mentions-legales.html", "/a-propos"):
         if emails:
             break
         try:

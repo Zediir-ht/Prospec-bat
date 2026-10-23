@@ -15,7 +15,6 @@ python -m prospec.cli source          # 1x : liste des entreprises du 12 (API Re
 python -m prospec.cli qualify -n 30   # détecte site / état / email de contact
 python -m prospec.cli run             # brouillons Gmail (SEND_MODE=draft) ou envoi (SEND_MODE=send), 10/jour
 python -m prospec.cli stats
-python -m prospec.cli export-calls    # entreprises ciblées mais sans email -> data/a_appeler.csv
 python -m prospec.cli suppress x@y.fr # désinscription (à faire à chaque "STOP" reçu)
 ```
 Quotidien (cron, 9h en semaine) : `qualify -n 30 && run`.
@@ -28,7 +27,7 @@ Renseigner `SENDER_LEGAL` (raison sociale, SIRET, adresse) avant tout envoi.
 ```bash
 python -m prospec.web   # http://localhost:8000
 ```
-Pages : Accueil (stats, mode d'envoi, « Préparer les mails du jour », désinscription), À valider (relire / modifier / envoyer / ignorer), Envoyés (marquer réponse ou refus), À appeler.
+Pages : Accueil (stats, mode d'envoi, « Préparer les mails du jour », désinscription), À valider (relire / modifier / envoyer / ignorer), Envoyés (marquer réponse ou refus). Prospection par email uniquement : les entreprises sans email public sont ignorées.
 Sur le téléphone : ouvrir l'URL dans Chrome > menu > « Ajouter à l'écran d'accueil ».
 
 Mode `review` (défaut) : les mails sont rédigés mais **rien ne part** tant que vous n'appuyez pas sur *Envoyer*.

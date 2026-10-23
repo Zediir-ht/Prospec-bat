@@ -11,7 +11,7 @@ app = Flask(__name__)
 app.secret_key = config.env("DASHBOARD_SECRET") or config.env("DASHBOARD_PASSWORD", "change-me")
 app.config.update(SESSION_COOKIE_HTTPONLY=True, SESSION_COOKIE_SAMESITE="Lax", PERMANENT_SESSION_LIFETIME=60 * 60 * 24 * 30)
 
-_job = {"running": False, "log": ""}
+_job = {"running": False, "log": "", "stop": False}
 
 CSS = """
 :root{--bg:#f6f7f9;--card:#fff;--tx:#1b1f24;--mut:#667085;--ac:#1d6feb;--ok:#12805c;--ko:#c0362c;--bd:#e4e7ec}
@@ -48,6 +48,10 @@ HOME = """<div class="grid">
 <p class="mut">review = vous validez chaque mail ici avant envoi.</p></div>
 <div class="card"><form method="post" action="{{url_for('run_now')}}"><button {{'disabled' if running}}>{{'En cours…' if running else 'Préparer les mails du jour'}}</button></form>
 <pre class="mut">{{log}}</pre></div>
+<div class="card"><b>Collecte d'adresses</b><p class="mut">Teste un grand nombre d'entreprises pour constituer un stock d'adresses (les envois restent limités à {{limit}} par jour). Peut durer des heures : laissez le téléphone branché.</p>
+<div class="row">{% if running %}<form method="post" action="{{url_for('stop_job')}}"><button class="btn ko">Arrêter</button></form>
+{% else %}<form method="post" action="{{url_for('collect_now')}}"><button class="btn">Lancer la collecte</button></form>{% endif %}</div></div>
+{% if running %}<script>setTimeout(function(){location.reload()},15000)</script>{% endif %}
 <div class="card"><form method="post" action="{{url_for('stop')}}"><b>Désinscription</b><p class="mut">Quelqu'un a répondu STOP :</p>
 <input type="email" name="email" placeholder="email@entreprise.fr" required><div class="row"><button class="ko">Ne plus contacter</button></div></form></div>"""
 
@@ -145,7 +149,7 @@ def index():
         stats = [("entreprises en base", sum(counts.values())), ("à valider", counts.get("drafted", 0)),
                  ("envoyés", counts.get("sent", 0) + counts.get("followed_up", 0)), ("réponses", counts.get("replied", 0)),
                  ("sans email (ignorées)", counts.get("no_email", 0)), ("refus", counts.get("refused", 0))]
-        body = render_template_string(HOME, stats=stats, modes=MODES, mode=db.send_mode(con), running=_job["running"], log=_job["log"])
+        body = render_template_string(HOME, stats=stats, modes=MODES, mode=db.send_mode(con), running=_job["running"], log=_job["log"], limit=cli.target())
     return page(body, tab, con)
 
 
@@ -229,7 +233,7 @@ def _run_daily():
             except Exception as exc:  # source facultative : on continue sans elle
                 print(f"OpenStreetMap indisponible : {exc}")
             _job["log"] = "Recherche d'adresses email…"
-            cli.cmd_qualify(con, A)
+            cli.qualify_batch(con, A.n, stop=lambda: _job["stop"], log=lambda t: _job.update(log=f"Recherche : {t}"))
         _job["log"] = "Rédaction des mails…"
         cli.cmd_run(con, A)
         _job["log"] = ("Terminé : voir « À valider »." if config.env("ANTHROPIC_API_KEY")
@@ -240,12 +244,39 @@ def _run_daily():
         _job["running"] = False
 
 
-def start_job():
+def _run_collect():
+    class A:
+        n = int(config.env("COLLECT_MAX", "1000"))
+    con = db.connect()
+    try:
+        _job["log"] = "Collecte en cours…"
+        tested, found = cli.cmd_collect(con, A, stop=lambda: _job["stop"], log=lambda t: _job.update(log=f"Collecte : {t}"))
+        _job["log"] = f"Collecte terminée : {tested} entreprises testées, {found} adresses trouvées."
+    except Exception as exc:
+        _job["log"] = f"Erreur : {exc}"
+    finally:
+        _job["running"] = False
+
+
+def start_job(target=None):
     if _job["running"]:
         return False
-    _job["running"] = True
-    threading.Thread(target=_run_daily, daemon=True).start()
+    _job.update(running=True, stop=False)
+    threading.Thread(target=target or _run_daily, daemon=True).start()
     return True
+
+
+@app.post("/collect")
+def collect_now():
+    start_job(_run_collect)
+    return redirect(url_for("index"))
+
+
+@app.post("/job/stop")
+def stop_job():
+    _job["stop"] = True
+    _job["log"] = "Arrêt demandé : fin après l'entreprise en cours…"
+    return redirect(url_for("index"))
 
 
 @app.post("/run")

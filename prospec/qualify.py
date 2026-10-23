@@ -137,7 +137,9 @@ def qualify_company(row, session=None):
     """row: dict avec nom, commune. Retourne dict site_url, site_status, site_issues, email."""
     session = session or requests.Session()
     try:
-        if config.env("GOOGLE_PLACES_KEY"):
+        if row.get("site_url"):  # déjà connu (OpenStreetMap ou recherche précédente) : pas de recherche web
+            site = row["site_url"]
+        elif config.env("GOOGLE_PLACES_KEY"):
             site = places_site(row["nom"], row["commune"], session)
         else:
             site = pick_site(row["nom"], search_urls(row["nom"], row["commune"], session))

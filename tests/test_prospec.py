@@ -1,3 +1,5 @@
+import pytest
+
 from prospec import db, mailer, qualify, sourcing
 
 
@@ -225,3 +227,52 @@ def test_migration_marks_old_emails_as_site(tmp_path):
     con.commit()
     con.close()
     assert db.connect(path).execute("SELECT email_source FROM companies").fetchone()[0] == "site"
+
+
+def test_osm_website_only_and_reuse(tmp_path, monkeypatch):
+    from prospec import osm
+
+    assert osm.parse_element({"type": "node", "id": 2, "tags": {"name": "Garage Bru", "website": "garage-bru.fr"}}, "12")["website"] == "https://garage-bru.fr"
+    assert osm.parse_element({"type": "node", "id": 3, "tags": {"name": "Bar X", "website": "https://facebook.com/barx"}}, "12") is None
+    assert '"ref:INSEE"="12"' in osm.QUERY.format(dept="12") and '["craft"]' in osm.QUERY
+
+    con = db.connect(tmp_path / "t.db")
+    con.execute("INSERT INTO osm_places VALUES ('node/2','12','Garage Bru','','https://garage-bru.fr','Rodez','12000')")
+    con.execute("INSERT INTO companies(siren,nom,commune,code_postal,status,site_status) VALUES('1','BRU AUTOMOBILES','Rodez','12000','no_email','none')")
+    con.commit()
+    assert osm.match(con) == 1
+    row = dict(con.execute("SELECT * FROM companies").fetchone())
+    assert row["site_url"] == "https://garage-bru.fr" and row["status"] == "new" and row["email"] is None
+
+    # le site connu est lu directement, sans recherche web
+    monkeypatch.setattr(qualify, "search_urls", lambda *a: pytest.fail("recherche web inutile"))
+    monkeypatch.setattr(qualify, "fetch", lambda url, session: ("https://garage-bru.fr/", "<html>contact@garage-bru.fr © 2015</html>"))
+    res = qualify.qualify_company(row)
+    assert res["email"] == "contact@garage-bru.fr" and res["site_status"] == "outdated"
+
+
+def test_collect_goes_beyond_daily_target(tmp_path, monkeypatch):
+    from prospec import cli, osm
+
+    monkeypatch.setenv("DAILY_LIMIT", "2")
+    monkeypatch.setattr(cli.time, "sleep", lambda s: None)
+    monkeypatch.setattr(sourcing, "source", lambda con, min_pool=300: 0)
+    monkeypatch.setattr(osm, "refresh", lambda con: 0)
+    con = db.connect(tmp_path / "t.db")
+    for i in range(8):
+        con.execute("INSERT INTO companies(siren,nom,commune,code_postal) VALUES(?,?,?,?)", (str(i), f"E{i}", "Rodez", "12000"))
+    con.commit()
+    monkeypatch.setattr(qualify, "qualify_company", lambda row, session=None: {
+        "site_url": None, "site_status": "none", "site_issues": "", "email": f"c{row['siren']}@e{row['siren']}.fr"})
+    logs = []
+
+    class A:
+        n = 100
+
+    assert cli.cmd_collect(con, A, log=logs.append) == (8, 8)
+    assert cli.pending(con) == 8 and logs[-1] == "8 entreprises testées, 8 adresses trouvées"
+
+    stops = iter([False, True])
+    con.execute("UPDATE companies SET status='new'")
+    con.commit()
+    assert cli.cmd_collect(con, A, stop=lambda: next(stops, True))[0] <= 1

@@ -1,4 +1,4 @@
-"""Usage : python -m prospec.cli {source|osm|qualify|run|suppress EMAIL|stats}"""
+"""Usage : python -m prospec.cli {source|osm|qualify [--all]|collect [-n N]|run|suppress EMAIL|stats}"""
 import argparse
 import random
 import sys
@@ -26,15 +26,20 @@ def pending(con):
     return len(next_to_write(con)) + drafted
 
 
-def cmd_qualify(con, args):
-    """Teste des entreprises une à une et s'arrête dès que `target()` mails exploitables sont réunis
-    (args.n = nombre maximum d'entreprises testées)."""
-    rows = con.execute("SELECT * FROM companies WHERE status='new' ORDER BY (code_postal LIKE '12%') DESC, RANDOM() LIMIT ?", (args.n,)).fetchall()
+def qualify_batch(con, limit, until_target=True, stop=None, log=None, base=(0, 0)):
+    """Teste jusqu'à `limit` entreprises. Avec until_target, s'arrête dès que `target()` mails exploitables
+    sont réunis. `stop()` permet d'interrompre, `log(texte)` de suivre la progression.
+    Retourne (entreprises testées, adresses trouvées)."""
+    rows = con.execute("SELECT * FROM companies WHERE status='new' ORDER BY (code_postal LIKE '12%') DESC, RANDOM() LIMIT ?", (limit,)).fetchall()
+    tested = found = 0
     for row in rows:
-        if pending(con) >= target():
+        if until_target and pending(con) >= target():
             print(f"Objectif atteint : {pending(con)} mails exploitables.")
             break
+        if stop and stop():
+            break
         res = qualify.qualify_company(dict(row))
+        tested += 1
         if res["email"]:
             res["email_source"] = "site"
         elif row["email"]:  # email déjà connu par OpenStreetMap
@@ -49,6 +54,7 @@ def cmd_qualify(con, args):
             status = "skip"  # entrepreneur individuel : pas de prospection sur une messagerie personnelle
         elif res["email"]:
             status = "qualified"
+            found += 1
         else:
             status = "no_email"  # cible pertinente mais aucun email public trouvé : ignorée
         con.execute(
@@ -57,7 +63,36 @@ def cmd_qualify(con, args):
         )
         con.commit()
         print(f"{row['nom']} ({row['commune']}) -> {res['site_status']} / {res['email']} / {status}")
+        if log:
+            log(f"{base[0] + tested} entreprises testées, {base[1] + found} adresses trouvées")
         time.sleep(random.uniform(1, 3))
+    return tested, found
+
+
+def cmd_qualify(con, args):
+    """Recherche du jour (s'arrête à `target()` mails), ou collecte sans limite avec --all."""
+    qualify_batch(con, args.n, until_target=not getattr(args, "all", False))
+
+
+def cmd_collect(con, args, stop=None, log=None):
+    """Mode collecte : remplit le stock d'adresses sans s'arrêter à DAILY_LIMIT, jusqu'à args.n entreprises
+    testées. Télécharge de nouvelles entreprises au fur et à mesure. Les envois restent limités à 10/jour."""
+    tested = found = 0
+    while tested < args.n and not (stop and stop()):
+        sourcing.source(con, min_pool=300)
+        try:
+            osm.refresh(con)
+            osm.match(con)
+        except Exception as exc:  # source facultative : on continue sans elle
+            print(f"OpenStreetMap indisponible : {exc}")
+        t, f = qualify_batch(con, min(args.n - tested, 100), until_target=False, stop=stop, log=log, base=(tested, found))
+        if t == 0:
+            break  # plus aucune entreprise à tester
+        tested, found = tested + t, found + f
+        if log:
+            log(f"{tested} entreprises testées, {found} adresses trouvées")
+    print(f"Collecte : {tested} entreprises testées, {found} adresses trouvées")
+    return tested, found
 
 
 def contact(con, row, subject, body, mode, followup=False):
@@ -138,12 +173,14 @@ def main():
     sub.add_parser("source")
     sub.add_parser("osm")
     q = sub.add_parser("qualify"); q.add_argument("-n", type=int, default=150)
+    q.add_argument("--all", action="store_true", help="ne pas s'arrêter à DAILY_LIMIT")
+    c = sub.add_parser("collect"); c.add_argument("-n", type=int, default=1000)
     sub.add_parser("run")
     s = sub.add_parser("suppress"); s.add_argument("email")
     sub.add_parser("stats")
     args = p.parse_args()
     con = db.connect()
-    {"source": cmd_source, "osm": cmd_osm, "qualify": cmd_qualify, "run": cmd_run, "suppress": cmd_suppress,
+    {"source": cmd_source, "osm": cmd_osm, "collect": cmd_collect, "qualify": cmd_qualify, "run": cmd_run, "suppress": cmd_suppress,
      "stats": cmd_stats}[args.cmd](con, args)
 
 

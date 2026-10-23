@@ -5,16 +5,19 @@ from datetime import datetime, timedelta
 import requests
 
 from . import config, db
-from .qualify import EMAIL_RE, name_tokens, norm
+from .qualify import DIRECTORIES, EMAIL_RE, norm
 
 OVERPASS = "https://overpass-api.de/api/interpreter"
 UA = {"User-Agent": "prospec-bat/1.0 (prospection B2B locale)"}
 
-QUERY = """[out:json][timeout:240];
-area["boundary"="administrative"]["admin_level"="6"]["ref:INSEE"="{dept}"]->.d;
-(nwr(area.d)["name"]["email"];
- nwr(area.d)["name"]["contact:email"];);
-out tags center;"""
+BUSINESS = ['["shop"]', '["craft"]', '["office"]',
+            '["amenity"~"^(restaurant|cafe|bar|pub|fast_food|ice_cream|car_repair|car_wash)$"]',
+            '["tourism"~"^(hotel|guest_house|camp_site|chalet|motel|apartment)$"]']
+QUERY = ("[out:json][timeout:300];\n"
+         'area["boundary"="administrative"]["admin_level"="6"]["ref:INSEE"="{dept}"]->.d;\n('
+         + "".join(f'nwr(area.d)["name"]["{k}"];' for k in ("email", "contact:email"))
+         + "".join(f'nwr(area.d)["name"]["{k}"]{b};' for k in ("website", "contact:website") for b in BUSINESS)
+         + ");\nout tags center;")
 
 # mots trop courants pour distinguer deux entreprises
 GENERIC = {"boulangerie", "patisserie", "restaurant", "garage", "coiffure", "salon", "plomberie", "chauffage",
@@ -27,11 +30,16 @@ def parse_element(el, dept):
     t = el.get("tags") or {}
     raw = t.get("contact:email") or t.get("email") or ""
     emails = EMAIL_RE.findall(raw.replace(",", ";"))
-    if not emails or not t.get("name"):
+    website = (t.get("contact:website") or t.get("website") or "").split(";")[0].strip()
+    if website and not website.startswith("http"):
+        website = "https://" + website
+    if any(d in website.lower() for d in DIRECTORIES):  # page Facebook, annuaire... : pas le site de l'entreprise
+        website = ""
+    if not t.get("name") or not (emails or website):
         return None
     return {
-        "osm_id": f"{el.get('type', 'x')}/{el.get('id')}", "dept": dept, "name": t["name"], "email": emails[0].lower(),
-        "website": t.get("contact:website") or t.get("website") or "",
+        "osm_id": f"{el.get('type', 'x')}/{el.get('id')}", "dept": dept, "name": t["name"],
+        "email": emails[0].lower() if emails else "", "website": website,
         "city": t.get("addr:city", ""), "postcode": t.get("addr:postcode", ""),
     }
 
@@ -47,18 +55,29 @@ def refresh(con, session=None, max_age_days=30):
     """Télécharge les lieux OSM avec email, par département (une fois par mois)."""
     n = 0
     for dept in config.DEPARTEMENTS:
-        last = db.get_setting(con, f"osm:{dept}")
+        last = db.get_setting(con, f"osm2:{dept}")
         if last and datetime.fromisoformat(last) > datetime.now() - timedelta(days=max_age_days):
             continue
         for p in fetch_dept(dept, session):
             con.execute("INSERT OR REPLACE INTO osm_places VALUES (:osm_id,:dept,:name,:email,:website,:city,:postcode)", p)
             n += 1
-        db.set_setting(con, f"osm:{dept}", datetime.now().isoformat())
+        db.set_setting(con, f"osm2:{dept}", datetime.now().isoformat())
     return n
 
 
+STOP = {"sarl", "sas", "sasu", "eurl", "snc", "societe", "entreprise", "ets", "etablissements", "groupe",
+        "les", "des", "aux", "and", "chez", "the"}
+
+
 def distinctive(name):
-    return {t for t in name_tokens(name) if norm(t) not in GENERIC}
+    """Mots qui distinguent l'entreprise (3 lettres minimum : beaucoup de noms aveyronnais sont courts)."""
+    words = re.findall(r"[a-z0-9]+", norm_spaces(name))
+    return {w for w in words if len(w) >= 3 and w not in STOP and w.rstrip("s") not in GENERIC and w not in GENERIC}
+
+
+def norm_spaces(s):
+    import unicodedata
+    return unicodedata.normalize("NFKD", s.lower()).encode("ascii", "ignore").decode()
 
 
 def same_company(company, place):
@@ -77,19 +96,27 @@ def same_company(company, place):
 
 
 def match(con):
-    """Renseigne l'email des entreprises sans email dont OSM publie l'adresse. Retourne le nombre d'appariements."""
+    """Complète, depuis OSM, l'email et/ou le site des entreprises encore à traiter. Retourne le nombre d'entreprises complétées."""
     by_token = {}
     for p in con.execute("SELECT * FROM osm_places").fetchall():
         for t in distinctive(p["name"]):
             by_token.setdefault(t, []).append(p)
     n = 0
-    rows = con.execute("SELECT * FROM companies WHERE email IS NULL AND status IN ('new','no_email')").fetchall()
+    rows = con.execute(
+        "SELECT * FROM companies WHERE status IN ('new','no_email') AND (email IS NULL OR site_url IS NULL)"
+    ).fetchall()
     for c in rows:
         for t in distinctive(c["nom"]):
-            hit = next((p for p in by_token.get(t, []) if same_company(c, p)), None)
-            if hit:
-                con.execute("UPDATE companies SET email=?, email_source='osm', status='new' WHERE siren=?", (hit["email"], c["siren"]))
-                n += 1
-                break
+            hit = next((p for p in by_token.get(t, []) if same_company(c, p)
+                        and ((p["email"] and not c["email"]) or (p["website"] and not c["site_url"]))), None)
+            if not hit:
+                continue
+            if hit["email"] and not c["email"]:
+                con.execute("UPDATE companies SET email=?, email_source='osm' WHERE siren=?", (hit["email"], c["siren"]))
+            if hit["website"] and not c["site_url"]:
+                con.execute("UPDATE companies SET site_url=? WHERE siren=?", (hit["website"], c["siren"]))
+            con.execute("UPDATE companies SET status='new' WHERE siren=?", (c["siren"],))  # à (re)tester
+            n += 1
+            break
     con.commit()
     return n

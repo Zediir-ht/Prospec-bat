@@ -68,7 +68,10 @@ Tout mail mentionnant un prix est refusé automatiquement.
 
 ## Sources d'adresses email
 1. **Site de l'entreprise** : pages d'accueil, contact, mentions légales ; détecte aussi les adresses masquées (`[at]`, `&#64;`, `%40`, protection Cloudflare).
-2. **OpenStreetMap** (`python -m prospec.cli osm`) : adresses que les entreprises publient elles-mêmes, licence ODbL. Appariées à la base SIRENE par nom et code postal.
+2. **OpenStreetMap** (`python -m prospec.cli osm`) : emails et sites web que les entreprises publient elles-mêmes, licence ODbL. Appariés à la base SIRENE par nom et code postal ; un site connu par OSM est lu directement, sans recherche web.
 3. **Google Places** (facultatif, `GOOGLE_PLACES_KEY`) : trouve le site officiel de façon fiable.
 Chaque mail indique d'où vient l'adresse (information exigée par le RGPD, art. 14) et propose de répondre STOP.
 Règle absolue : aucune adresse n'est jamais devinée ni reconstituée (`info@`, `prenom.nom@`…). Un mail ne part que vers une adresse lue sur le site de l'entreprise ou publiée par elle dans OpenStreetMap ; toute autre origine est refusée (`mailer.assert_sourced`). Non utilisé non plus : annuaires dont les conditions interdisent l'extraction (Pages Jaunes, réseaux sociaux), listes achetées d'origine inconnue.
+
+## Mode collecte (stock d'adresses)
+Bouton **Lancer la collecte** du dashboard, ou `python -m prospec.cli collect -n 1000` : teste les entreprises sans s'arrêter à 10, en téléchargeant de nouvelles entreprises au fur et à mesure, et remplit un stock d'adresses. Les envois restent limités à `DAILY_LIMIT` par jour. Bouton **Arrêter** pour interrompre. Compter plusieurs heures pour 1000 entreprises : téléphone branché, Termux en « batterie sans restriction ».

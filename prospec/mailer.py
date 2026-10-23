@@ -24,7 +24,6 @@ Règles strictes :
 - Mentionne le métier et la commune, et UN constat précis fourni (sans l'exagérer ni l'inventer).
 - Bénéfice concret : être trouvé par les clients de la région qui cherchent leur activité sur internet depuis leur téléphone.
 - Propose de préparer une maquette gratuite de leur site, sans engagement, et demande si ça les intéresse.
-- Glisse une fois, naturellement, que des exemples de réalisations sont visibles sur zdrdev.fr.
 - N'indique AUCUN prix, tarif ou montant.
 - Ne mets ni signature ni formule de désinscription : elles sont ajoutées automatiquement.
 Les informations sur l'entreprise sont fournies en JSON."""

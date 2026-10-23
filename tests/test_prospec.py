@@ -407,4 +407,3 @@ def test_signature_has_contact_details(monkeypatch):
     text = mailer.build_message("a@b.fr", "S", "Bonjour", "site").get_content()
     assert "https://zdrdev.fr" in text and "06 32 91 53 77" in text and "corentin.mayrand@gmail.com" in text
     assert mailer.format_phone("0632915377") == "06 32 91 53 77"
-    assert "zdrdev.fr" in mailer.batch_prompt([])

@@ -78,3 +78,7 @@ Bouton **Lancer la collecte** du dashboard, ou `python -m prospec.cli collect -n
 
 ## Vitesse
 La recherche teste `WORKERS` (20) entreprises en parallèle : la lecture des sites se fait en même temps, seule la recherche web (DuckDuckGo) est espacée de `SEARCH_INTERVAL` (1 s) pour ne pas être bloquée, et ralentit d'elle-même si le moteur refuse des requêtes. Les entreprises dont le site est connu par OpenStreetMap ne passent pas par la recherche web. Avec Google Places (`GOOGLE_PLACES_KEY`), on peut baisser `SEARCH_INTERVAL` à 0.1.
+
+## Recherche par enseigne et par métier
+- Chaque entreprise est cherchée sous son **enseigne** (« Plomberie du Rouergue ») puis sous son nom légal (« SARL DUPONT ET FILS »).
+- `python -m prospec.cli discover -n 20` (lancé aussi par la collecte et « Préparer les mails du jour ») cherche « métier + commune » (« plomberie et chauffage Rodez ») et rattache les sites trouvés aux entreprises SIRENE : par le **SIREN/SIRET** affiché dans les mentions légales (certain), sinon par le nom dans l'adresse du site s'il ne désigne qu'une entreprise de la commune.

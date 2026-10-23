@@ -14,6 +14,16 @@ def metier_for(naf):
     return config.NAF_METIERS.get(naf) or config.METIERS.get(naf[:5]) or "entreprise"
 
 
+def enseigne_of(siege, nom):
+    """Nom commercial affiché par l'établissement (« Plomberie du Rouergue »), s'il diffère du nom légal."""
+    candidates = list(siege.get("liste_enseignes") or []) + [siege.get("nom_commercial") or ""]
+    for e in candidates:
+        e = (e or "").strip()
+        if e and e.lower() not in nom.lower():
+            return e.title()
+    return ""
+
+
 def parse_result(r):
     siege = r.get("siege") or {}
     naf = r.get("activite_principale") or siege.get("activite_principale") or ""
@@ -22,9 +32,11 @@ def parse_result(r):
         if d.get("type_dirigeant") == "personne physique":
             dirigeant = f"{(d.get('prenoms') or '').split(',')[0].title()} {(d.get('nom') or '').title()}".strip()
             break
+    nom = r.get("nom_complet") or r.get("nom_raison_sociale") or ""
     return {
         "siren": r["siren"],
-        "nom": r.get("nom_complet") or r.get("nom_raison_sociale") or "",
+        "nom": nom,
+        "enseigne": enseigne_of(siege, nom),
         "commune": (siege.get("libelle_commune") or "").title(),
         "code_postal": siege.get("code_postal") or "",
         "naf": naf,
@@ -76,13 +88,17 @@ def source(con, session=None, min_pool=300):
             if pool_size(con) >= min_pool:
                 return added
             for c in fetch_naf(naf, dept, session):
+                c.setdefault("enseigne", "")
                 cur = con.execute(
                     """INSERT OR IGNORE INTO companies
-                       (siren, nom, commune, code_postal, naf, metier, dirigeant, effectif, nature_juridique)
-                       VALUES (:siren,:nom,:commune,:code_postal,:naf,:metier,:dirigeant,:effectif,:nature_juridique)""",
+                       (siren, nom, enseigne, commune, code_postal, naf, metier, dirigeant, effectif, nature_juridique)
+                       VALUES (:siren,:nom,:enseigne,:commune,:code_postal,:naf,:metier,:dirigeant,:effectif,:nature_juridique)""",
                     c,
                 )
                 added += cur.rowcount
+                if not cur.rowcount and c["enseigne"]:  # entreprise déjà connue : on complète son enseigne
+                    con.execute("UPDATE companies SET enseigne=? WHERE siren=? AND COALESCE(enseigne,'')=''",
+                                (c["enseigne"], c["siren"]))
             con.execute("INSERT OR IGNORE INTO sourced(dept, naf) VALUES (?, ?)", (dept, naf))
             con.commit()
     return added

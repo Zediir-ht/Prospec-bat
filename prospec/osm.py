@@ -80,9 +80,18 @@ def norm_spaces(s):
     return unicodedata.normalize("NFKD", s.lower()).encode("ascii", "ignore").decode()
 
 
+def company_names(company):
+    keys = company.keys() if hasattr(company, "keys") else company
+    return [company["nom"]] + ([company["enseigne"]] if "enseigne" in keys and company["enseigne"] else [])
+
+
 def same_company(company, place):
-    """Même entreprise : même lieu (code postal ou commune) et noms distinctifs recoupés."""
-    a, b = distinctive(company["nom"]), distinctive(place["name"])
+    """Même entreprise : même lieu et noms distinctifs recoupés (nom légal ou enseigne)."""
+    return any(same_name_and_place(n, company, place) for n in company_names(company))
+
+
+def same_name_and_place(name, company, place):
+    a, b = distinctive(name), distinctive(place["name"])
     if not a or not b:
         return False
     inter = a & b
@@ -106,7 +115,7 @@ def match(con):
         "SELECT * FROM companies WHERE status IN ('new','no_email') AND (email IS NULL OR site_url IS NULL)"
     ).fetchall()
     for c in rows:
-        for t in distinctive(c["nom"]):
+        for t in set().union(*(distinctive(n) for n in company_names(c))):
             hit = next((p for p in by_token.get(t, []) if same_company(c, p)
                         and ((p["email"] and not c["email"]) or (p["website"] and not c["site_url"]))), None)
             if not hit:

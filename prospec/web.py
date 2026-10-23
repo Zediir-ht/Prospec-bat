@@ -232,6 +232,11 @@ def _run_daily():
                 cli.cmd_osm(con, A)
             except Exception as exc:  # source facultative : on continue sans elle
                 print(f"OpenStreetMap indisponible : {exc}")
+            _job["log"] = "Recherche par métier et par ville…"
+            try:
+                cli.discovery.run(con, max_queries=5, stop=lambda: _job["stop"])
+            except Exception as exc:
+                print(f"Recherche par métier indisponible : {exc}")
             _job["log"] = "Recherche d'adresses email…"
             cli.qualify_batch(con, A.n, stop=lambda: _job["stop"], log=lambda t: _job.update(log=f"Recherche : {t}"))
         _job["log"] = "Rédaction des mails…"

@@ -44,7 +44,8 @@ def followup_mail(c):
 def describe(c):
     angle = ANGLES.get(c["site_status"], "").format(issues=c.get("site_issues", ""))
     return {
-        "siren": c["siren"], "entreprise": c["nom"], "commune": c["commune"], "activite": c["metier"],
+        "siren": c["siren"], "entreprise": c.get("enseigne") or c["nom"],
+        "raison_sociale": c["nom"], "commune": c["commune"], "activite": c["metier"],
         "dirigeant": c.get("dirigeant") or "inconnu", "constat": angle,
     }
 

@@ -337,3 +337,65 @@ def test_search_throttle_spaces_requests(monkeypatch):
     qualify.search_feedback(True)
     assert qualify._search["penalty"] == 1.5
     qualify._search["penalty"] = 0.0
+
+
+def test_enseigne_parsed_and_used_for_search(monkeypatch):
+    r = {"siren": "1", "nom_complet": "SARL DUPONT ET FILS", "activite_principale": "43.22A",
+         "siege": {"libelle_commune": "RODEZ", "code_postal": "12000", "liste_enseignes": ["PLOMBERIE DU ROUERGUE"]}}
+    c = sourcing.parse_result(r)
+    assert c["enseigne"] == "Plomberie Du Rouergue"
+    assert sourcing.enseigne_of({"liste_enseignes": ["DUPONT"]}, "SARL DUPONT") == ""  # identique au nom : ignorée
+
+    queries = []
+
+    def fake_search(name, commune, session):
+        queries.append(name)
+        return ["https://www.plomberie-du-rouergue.fr/"] if "Rouergue" in name else []
+
+    monkeypatch.setattr(qualify, "search_urls", fake_search)
+    monkeypatch.setattr(qualify, "fetch", lambda url, session: (url, '<meta name="viewport"> © 2025 contact@plomberie-du-rouergue.fr'))
+    res = qualify.qualify_company({"nom": c["nom"], "enseigne": c["enseigne"], "commune": "Rodez"})
+    assert queries == ["Plomberie Du Rouergue"] and res["email"] == "contact@plomberie-du-rouergue.fr"
+
+
+def test_osm_matches_on_enseigne(tmp_path):
+    from prospec import osm
+
+    con = db.connect(tmp_path / "t.db")
+    con.execute("INSERT INTO osm_places VALUES ('node/1','12','Le Fournil Ruthénois','pain@fournil-ruthenois.fr','','Rodez','12000')")
+    con.execute("INSERT INTO companies(siren,nom,enseigne,commune,code_postal,status) VALUES('1','SAS MARTY','Le Fournil Ruthénois','Rodez','12000','new')")
+    con.commit()
+    assert osm.match(con) == 1
+    assert con.execute("SELECT email FROM companies").fetchone()[0] == "pain@fournil-ruthenois.fr"
+
+
+def test_discovery_links_sites_by_siren_and_name(tmp_path, monkeypatch):
+    from prospec import discovery
+
+    con = db.connect(tmp_path / "t.db")
+    rows = [("123456789", "SARL ALBOUY", "", "plomberie et chauffage"), ("987654321", "BOUSQUET", "", "plomberie et chauffage"),
+            ("555555555", "CAYLA", "", "plomberie et chauffage"), ("444444444", "ROUX", "", "boulangerie")]
+    for siren, nom, ens, metier in rows:
+        con.execute("INSERT INTO companies(siren,nom,enseigne,commune,code_postal,metier,status) VALUES(?,?,?,?,?,?,'new')",
+                    (siren, nom, ens, "Rodez", "12000", metier))
+    con.commit()
+    assert discovery.next_queries(con, 5)[0][0] == "plomberie et chauffage Rodez"
+
+    monkeypatch.setattr(discovery, "search_urls", lambda metier, commune, session: [
+        "https://www.pagesjaunes.fr/x", "https://chauffage-ruthenois.fr/", "https://www.bousquet-plomberie.fr/contact",
+        "https://autre-site.fr/"])
+    pages = {"https://chauffage-ruthenois.fr/mentions-legales": "SARL Albouy - SIRET 123 456 789 00015"}
+
+    def fake_fetch(url, session):
+        if url in pages:
+            return url, pages[url]
+        if url.endswith(("legales", ".html", "/", "_legales")) and "mentions" in url:
+            raise discovery.requests.RequestException()
+        return url, "<html>accueil</html>"
+
+    monkeypatch.setattr(discovery, "fetch", fake_fetch)
+    done, linked = discovery.run(con, max_queries=1, workers=3)
+    assert (done, linked) == (1, 2)
+    sites = dict(con.execute("SELECT siren, site_url FROM companies WHERE site_url IS NOT NULL").fetchall())
+    assert sites == {"123456789": "https://chauffage-ruthenois.fr", "987654321": "https://www.bousquet-plomberie.fr"}
+    assert discovery.next_queries(con, 5) == [("boulangerie Rodez", "boulangerie", "Rodez")]  # requête déjà faite

@@ -1,11 +1,11 @@
-"""Usage : python -m prospec.cli {source|osm|qualify [--all]|collect [-n N]|run|suppress EMAIL|stats}"""
+"""Usage : python -m prospec.cli {source|osm|discover [-n N]|qualify [--all]|collect [-n N]|run|suppress EMAIL|stats}"""
 import argparse
 import random
 import sys
 import time
 from concurrent.futures import FIRST_COMPLETED, ThreadPoolExecutor, wait
 
-from . import config, db, mailer, osm, qualify, sourcing
+from . import config, db, discovery, mailer, osm, qualify, sourcing
 
 
 def cmd_source(con, _):
@@ -15,6 +15,11 @@ def cmd_source(con, _):
 def cmd_osm(con, _):
     print(f"{osm.refresh(con)} lieux OpenStreetMap avec email récupérés")
     print(f"{osm.match(con)} entreprises appariées")
+
+
+def cmd_discover(con, args):
+    done, linked = discovery.run(con, max_queries=args.n)
+    print(f"{done} recherches par métier et ville, {linked} sites rattachés à une entreprise")
 
 
 def target():
@@ -118,6 +123,7 @@ def cmd_collect(con, args, stop=None, log=None):
             osm.match(con)
         except Exception as exc:  # source facultative : on continue sans elle
             print(f"OpenStreetMap indisponible : {exc}")
+        discovery.run(con, max_queries=10, stop=stop, log=(lambda t: log(f"Collecte : {t}")) if log else None)
         t, f = qualify_batch(con, min(args.n - tested, 100), until_target=False, stop=stop, log=log, base=(tested, found))
         if t == 0:
             break  # plus aucune entreprise à tester
@@ -208,12 +214,13 @@ def main():
     q = sub.add_parser("qualify"); q.add_argument("-n", type=int, default=150)
     q.add_argument("--all", action="store_true", help="ne pas s'arrêter à DAILY_LIMIT")
     c = sub.add_parser("collect"); c.add_argument("-n", type=int, default=1000)
+    d = sub.add_parser("discover"); d.add_argument("-n", type=int, default=20)
     sub.add_parser("run")
     s = sub.add_parser("suppress"); s.add_argument("email")
     sub.add_parser("stats")
     args = p.parse_args()
     con = db.connect()
-    {"source": cmd_source, "osm": cmd_osm, "collect": cmd_collect, "qualify": cmd_qualify, "run": cmd_run, "suppress": cmd_suppress,
+    {"source": cmd_source, "osm": cmd_osm, "collect": cmd_collect, "discover": cmd_discover, "qualify": cmd_qualify, "run": cmd_run, "suppress": cmd_suppress,
      "stats": cmd_stats}[args.cmd](con, args)
 
 

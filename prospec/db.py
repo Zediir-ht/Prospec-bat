@@ -6,7 +6,7 @@ from .config import DATA_DIR, DB_PATH
 SCHEMA = """
 CREATE TABLE IF NOT EXISTS companies (
     siren TEXT PRIMARY KEY,
-    nom TEXT, commune TEXT, code_postal TEXT, naf TEXT, metier TEXT,
+    nom TEXT, enseigne TEXT, commune TEXT, code_postal TEXT, naf TEXT, metier TEXT,
     dirigeant TEXT, effectif TEXT, nature_juridique TEXT,
     site_url TEXT, site_status TEXT,   -- none | ok | outdated | unknown
     site_issues TEXT,
@@ -17,6 +17,7 @@ CREATE TABLE IF NOT EXISTS companies (
     created_at TEXT DEFAULT CURRENT_TIMESTAMP
 );
 CREATE TABLE IF NOT EXISTS osm_places (osm_id TEXT PRIMARY KEY, dept TEXT, name TEXT, email TEXT, website TEXT, city TEXT, postcode TEXT);
+CREATE TABLE IF NOT EXISTS discovered (query TEXT PRIMARY KEY, done_at TEXT);
 CREATE TABLE IF NOT EXISTS sourced (dept TEXT, naf TEXT, PRIMARY KEY (dept, naf));
 CREATE TABLE IF NOT EXISTS settings (key TEXT PRIMARY KEY, value TEXT);
 CREATE TABLE IF NOT EXISTS suppression (email TEXT PRIMARY KEY, added_at TEXT DEFAULT CURRENT_TIMESTAMP);
@@ -28,12 +29,16 @@ def connect(path=None):
     con = sqlite3.connect(path or DB_PATH)
     con.row_factory = sqlite3.Row
     con.executescript(SCHEMA)
-    for col in ("nature_juridique", "email_source"):  # colonnes ajoutées après la 1re version
+    for col in ("nature_juridique", "email_source", "enseigne"):  # colonnes ajoutées après la 1re version
         try:
             con.execute(f"ALTER TABLE companies ADD COLUMN {col} TEXT")
         except sqlite3.OperationalError:
             pass
     con.execute("UPDATE companies SET status='no_email' WHERE status='to_call'")
+    # les entreprises téléchargées avant l'ajout de l'enseigne seront retéléchargées peu à peu pour la compléter
+    if not con.execute("SELECT 1 FROM settings WHERE key='sourced_v2'").fetchone():
+        con.execute("DELETE FROM sourced")
+        con.execute("INSERT INTO settings(key, value) VALUES('sourced_v2', '1')")
     # avant l'ajout de email_source, toute adresse venait d'une lecture du site de l'entreprise
     con.execute("UPDATE companies SET email_source='site' WHERE email IS NOT NULL AND email_source IS NULL")
     con.commit()

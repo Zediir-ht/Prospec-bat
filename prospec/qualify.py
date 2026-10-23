@@ -175,10 +175,17 @@ def qualify_company(row, session=None):
     try:
         if row.get("site_url"):  # déjà connu (OpenStreetMap ou recherche précédente) : pas de recherche web
             site = row["site_url"]
-        elif config.env("GOOGLE_PLACES_KEY"):
-            site = places_site(row["nom"], row["commune"], session)
         else:
-            site = pick_site(row["nom"], search_urls(row["nom"], row["commune"], session))
+            site = None
+            names = [n for n in (row.get("enseigne"), row["nom"]) if n]
+            both = " ".join(names)
+            for name in names:  # l'enseigne d'abord : c'est le nom sous lequel l'entreprise se présente
+                if config.env("GOOGLE_PLACES_KEY"):
+                    site = places_site(name, row["commune"], session)
+                else:
+                    site = pick_site(both, search_urls(name, row["commune"], session))
+                if site:
+                    break
     except requests.RequestException:
         return {"site_url": None, "site_status": "unknown", "site_issues": "", "email": None}
     if not site:

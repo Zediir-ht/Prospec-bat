@@ -24,6 +24,7 @@ Règles strictes :
 - Mentionne le métier et la commune, et UN constat précis fourni (sans l'exagérer ni l'inventer).
 - Bénéfice concret : être trouvé par les clients de la région qui cherchent leur activité sur internet depuis leur téléphone.
 - Propose de préparer une maquette gratuite de leur site, sans engagement, et demande si ça les intéresse.
+- Glisse une fois, naturellement, que des exemples de réalisations sont visibles sur zdrdev.fr.
 - N'indique AUCUN prix, tarif ou montant.
 - Ne mets ni signature ni formule de désinscription : elles sont ajoutées automatiquement.
 Les informations sur l'entreprise sont fournies en JSON."""
@@ -133,11 +134,24 @@ def assert_sourced(row):
         raise ValueError(f"adresse non sourcée pour {row['nom']} : envoi refusé")
 
 
+def format_phone(tel):
+    """« 0632915377 » ou « +33632915377 » -> « 06 32 91 53 77 »."""
+    digits = re.sub(r"\D", "", tel or "")
+    if digits.startswith("33") and len(digits) == 11:
+        digits = "0" + digits[2:]
+    if len(digits) == 10:
+        return " ".join(digits[i:i + 2] for i in range(0, 10, 2))
+    return (tel or "").strip()
+
+
 def signature(source=None):
     s = config.sender()
-    lines = ["", "Cordialement,", f"{s['prenom']} {s['nom']}", f"Création de sites web - {s['site']}"]
+    lines = ["", "Cordialement,", "", f"{s['prenom']} {s['nom']}", "Création de sites web en Aveyron"]
+    if s["site"]:
+        lines.append(f"Site : {s['site']}")
     if s["tel"]:
-        lines.append(s["tel"])
+        lines.append(f"Tél. : {format_phone(s['tel'])}")
+    lines.append(f"Mail : {s['email']}")
     lines += [
         "",
         "--",

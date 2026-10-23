@@ -399,3 +399,12 @@ def test_discovery_links_sites_by_siren_and_name(tmp_path, monkeypatch):
     sites = dict(con.execute("SELECT siren, site_url FROM companies WHERE site_url IS NOT NULL").fetchall())
     assert sites == {"123456789": "https://chauffage-ruthenois.fr", "987654321": "https://www.bousquet-plomberie.fr"}
     assert discovery.next_queries(con, 5) == [("boulangerie Rodez", "boulangerie", "Rodez")]  # requête déjà faite
+
+
+def test_signature_has_contact_details(monkeypatch):
+    monkeypatch.setenv("SENDER_PHONE", "+33632915377")
+    monkeypatch.setenv("SENDER_WEBSITE", "https://zdrdev.fr")
+    text = mailer.build_message("a@b.fr", "S", "Bonjour", "site").get_content()
+    assert "https://zdrdev.fr" in text and "06 32 91 53 77" in text and "corentin.mayrand@gmail.com" in text
+    assert mailer.format_phone("0632915377") == "06 32 91 53 77"
+    assert "zdrdev.fr" in mailer.batch_prompt([])

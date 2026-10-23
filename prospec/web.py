@@ -106,6 +106,7 @@ button[disabled]{opacity:.7;cursor:wait}
 .btn.ko:active,button.ko:active{box-shadow:0 0 0 3px var(--line),0 1px 0 3px var(--red2)}
 .btn.gh{background:#fff;color:var(--ink);box-shadow:0 0 0 3px var(--line),0 5px 0 3px var(--line)}
 .btn.big{font-size:18px;padding:17px 20px 18px;width:100%;text-align:center;background:var(--yellow);color:var(--ink);box-shadow:0 0 0 3px var(--line),0 6px 0 3px var(--yellow2),inset 0 4px 0 #fff8}
+pre.sig{font:600 14px/1.45 var(--body);color:var(--mut);background:var(--soft);border-radius:16px;padding:4px 14px 12px;margin:0}
 pre{white-space:pre-wrap;font:700 14px/1.5 var(--display);margin:12px 0 0;color:var(--blue2)}
 a{color:var(--blue2);font-weight:700}
 .msg{background:#e3fbea;font:700 15px/1.4 var(--display);display:flex;gap:10px;align-items:center}
@@ -166,7 +167,8 @@ DRAFT = """{% for c in rows %}<div class="block"><h2>{{c.enseigne or c.nom}}</h2
 <span class="tag">{{c.commune}}</span><span class="tag">{{c.metier}}</span><span class="tag {{'hot' if c.site_status=='none' else 'warm'}}">""" + SITE + """</span>
 <div class="mut" style="margin-top:6px">{{c.email}}{% if c.site_url %} · <a href="{{c.site_url}}" target="_blank" rel="noopener">voir le site</a>{% endif %}</div>
 <form method="post" action="{{url_for('draft_action',siren=c.siren)}}"><input name="subject" aria-label="Objet" value="{{c.subject}}" style="margin-top:10px">
-<textarea name="body" aria-label="Message">{{c.body}}</textarea><div class="row">
+<textarea name="body" aria-label="Message">{{c.body}}</textarea>
+<p class="mut" style="margin:10px 0 4px">Ajouté automatiquement en bas du mail :</p><pre class="sig">{{sig(c.email_source)}}</pre><div class="row">
 <button name="act" value="send" class="ok" onclick="return confirm('Envoyer ce mail à {{c.email}} ?')">✉ Envoyer</button>
 <button name="act" value="save" class="btn gh">Enregistrer</button><button name="act" value="skip" class="ko">Ignorer</button></div></form></div>
 {% else %}<div class="block idle"><i class="bot"></i><span class="mut">Aucun mail en attente. Passez par « À rédiger », ou lancez « Préparer les mails du jour » depuis l'accueil.</span></div>{% endfor %}"""
@@ -257,7 +259,7 @@ def index():
     con = connect()
     if tab == "drafts":
         rows = con.execute("SELECT * FROM companies WHERE status='drafted' ORDER BY contacted_at").fetchall()
-        body = render_template_string(DRAFT, rows=rows)
+        body = render_template_string(DRAFT, rows=rows, sig=mailer.signature)
     elif tab == "write":
         batch = cli.next_to_write(con)[: int(config.env("DAILY_LIMIT", "10"))]
         body = render_template_string(

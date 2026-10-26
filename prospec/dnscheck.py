@@ -8,13 +8,28 @@ except ImportError:  # dnspython absent : on ne bloque rien
     dns = None
 
 
+def make_resolver():
+    """Résolveur DNS. Sur Android (Termux), /etc/resolv.conf n'existe pas : on utilise alors des DNS publics."""
+    try:
+        resolver = dns.resolver.Resolver()
+    except Exception:
+        resolver = dns.resolver.Resolver(configure=False)
+        resolver.nameservers = ["1.1.1.1", "8.8.8.8"]
+    if not getattr(resolver, "nameservers", None):
+        resolver.nameservers = ["1.1.1.1", "8.8.8.8"]
+    resolver.lifetime, resolver.timeout = 5, 3
+    return resolver
+
+
 @lru_cache(maxsize=4096)
 def domain_status(domain):
     """'ok', 'invalid' (le domaine n'existe pas ou n'accepte aucun courrier) ou 'unknown' (réseau, délai dépassé)."""
     if dns is None or not domain:
         return "unknown"
-    resolver = dns.resolver.Resolver()
-    resolver.lifetime, resolver.timeout = 5, 3
+    try:
+        resolver = make_resolver()
+    except Exception:  # la vérification est un plus : elle ne doit jamais bloquer un envoi
+        return "unknown"
     try:
         answers = resolver.resolve(domain, "MX")
         # MX « . » = le domaine déclare ne recevoir aucun courrier (RFC 7505)

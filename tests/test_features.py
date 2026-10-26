@@ -91,6 +91,11 @@ def test_domain_status_with_fake_resolver(monkeypatch):
 
     class FakeResolver:
         lifetime = timeout = 0
+        nameservers = ["9.9.9.9"]
+
+        def __init__(self, configure=True):
+            pass
+
         answers = {("ok.fr", "MX"): [Ans("mx.ok.fr.")], ("nullmx.fr", "MX"): [Ans(".")]}
 
         def resolve(self, domain, kind):
@@ -252,3 +257,37 @@ def test_empty_mail_is_refused(con, monkeypatch):
         cli.send_now(con, row, "", "Corps")
     with pytest.raises(ValueError, match="vide"):
         cli.send_followup_now(con, row, "Objet", "   ")
+
+
+def test_dns_check_survives_missing_resolv_conf(monkeypatch):
+    """Android/Termux : pas de /etc/resolv.conf -> DNS publics ; et aucune erreur ne doit bloquer un envoi."""
+    import dns.resolver
+
+    monkeypatch.undo()
+    dnscheck.domain_status.cache_clear()
+    created = []
+
+    class Android:
+        def __init__(self, configure=True):
+            if configure:
+                raise dns.resolver.NoResolverConfiguration("cannot open /etc/resolv.conf")
+            self.nameservers = []
+            created.append(self)
+
+        def resolve(self, domain, kind):
+            class A:
+                exchange = "mx.example.fr."
+            return [A()]
+
+    monkeypatch.setattr(dns.resolver, "Resolver", Android)
+    assert dnscheck.domain_status("example.fr") == "ok"
+    assert created[0].nameservers == ["1.1.1.1", "8.8.8.8"]
+
+    dnscheck.domain_status.cache_clear()
+
+    def broken(configure=True):
+        raise OSError("cannot open /etc/resolv.conf")
+
+    monkeypatch.setattr(dns.resolver, "Resolver", broken)
+    assert dnscheck.domain_status("autre.fr") == "unknown" and dnscheck.email_ok("a@autre.fr")
+    dnscheck.domain_status.cache_clear()

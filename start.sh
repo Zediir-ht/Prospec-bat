@@ -9,7 +9,7 @@ if [ ! -f .env ]; then
 fi
 
 # Installe les dépendances nécessaires au dashboard si besoin
-python -c "import flask, requests" 2>/dev/null || pip install requests flask || exit 1
+python -c "import flask, requests, dns" 2>/dev/null || pip install requests flask dnspython || exit 1
 
 # Termux : empêche Android d'endormir le programme
 command -v termux-wake-lock >/dev/null 2>&1 && termux-wake-lock

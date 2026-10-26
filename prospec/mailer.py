@@ -32,13 +32,42 @@ FORMAT_SINGLE = "\nRéponds en deux parties séparées par un saut de ligne : la
 
 
 def followup_mail(c):
+    """Relance par défaut (modifiable à l'écran), dans le même fil que le premier mail."""
     salut = f"Bonjour {c['dirigeant'].split()[0]}," if c.get("dirigeant") else "Bonjour,"
     body = (
         f"{salut}\n\nJe me permets de revenir vers vous suite à mon message de la semaine dernière. "
         f"Ma proposition reste la même : une maquette gratuite de votre site, sans engagement.\n\n"
         f"Si ce n'est pas le bon moment, aucun souci, il vous suffit de me le dire."
     )
-    return f"Re : Un site pour {c['nom']} ?", body
+    first = (c.get("subject") or "").strip()
+    return (f"Re : {first}" if first else f"Re : Un site pour {c['nom']} ?"), body
+
+
+FOLLOWUP_SYSTEM = """Tu rédiges une RELANCE courte, en français, pour Corentin Mayrand, créateur de sites web, à destination d'une entreprise
+locale qui n'a pas répondu à son premier mail (fourni ci-dessous) il y a environ une semaine.
+Règles strictes :
+- 2 à 4 phrases, vouvoiement, ton courtois et léger, jamais insistant ni culpabilisant.
+- Commence par "Bonjour" suivi du prénom du dirigeant s'il est fourni, sinon "Bonjour,".
+- Ne répète pas le premier mail : rappelle simplement la maquette gratuite et sans engagement, avec un petit élément nouveau
+  (une question simple, ou l'idée qu'un site se consulte surtout sur téléphone).
+- Dis que ce n'est pas grave si ce n'est pas le moment.
+- N'indique AUCUN prix, tarif ou montant. Ne mets ni signature ni formule de désinscription.
+- L'objet commence par "Re : " suivi de l'objet du premier mail."""
+
+
+def batch_followup_prompt(companies):
+    """Demande à coller dans Claude (claude.ai) pour rédiger plusieurs relances d'un coup."""
+    data = json.dumps([
+        {**describe(c), "premier_mail_objet": c.get("subject") or "", "premier_mail_texte": c.get("body") or ""} for c in companies
+    ], ensure_ascii=False, indent=1)
+    return (
+        FOLLOWUP_SYSTEM
+        + "\n\nRédige une relance DIFFÉRENTE et personnalisée pour chacune des entreprises ci-dessous."
+        + " Réponds uniquement avec un tableau JSON, sans aucun autre texte, de la forme :"
+        + ' [{"siren": "...", "subject": "objet", "body": "corps de la relance"}]'
+        + "\nLes retours à la ligne du corps s'écrivent \\n dans le JSON."
+        + "\n\nEntreprises :\n" + data
+    )
 
 
 def describe(c):
@@ -69,9 +98,9 @@ def claude_mail(c):
 FORBIDDEN = ("€", "euro", "tarif", "prix", "devis gratuit à partir")
 
 
-def check_mail(subject, body):
+def check_mail(subject, body, min_len=80):
     text = f"{subject}\n{body}".lower()
-    if not subject or len(body) < 80:
+    if not subject or len(body) < min_len:
         raise ValueError("mail vide ou trop court")
     if any(w in text for w in FORBIDDEN):
         raise ValueError("le mail mentionne un prix")
@@ -102,7 +131,7 @@ def batch_prompt(companies):
     )
 
 
-def parse_batch(text, allowed):
+def parse_batch(text, allowed, min_len=80):
     """Lit la réponse de Claude. Retourne (mails valides {siren: (objet, corps)}, liste d'erreurs)."""
     m = re.search(r"\[.*\]", text, re.S)
     if not m:
@@ -118,7 +147,7 @@ def parse_batch(text, allowed):
             errors.append(f"entreprise inconnue ou déjà traitée : {siren or '?'}")
             continue
         try:
-            ok[siren] = check_mail(str(it.get("subject", "")).strip(), str(it.get("body", "")).strip())
+            ok[siren] = check_mail(str(it.get("subject", "")).strip(), str(it.get("body", "")).strip(), min_len)
         except ValueError as exc:
             errors.append(f"{allowed[siren]} : {exc}")
     return ok, errors
@@ -163,7 +192,7 @@ def signature(source=None):
     return "\n".join(lines)
 
 
-def build_message(to, subject, body, source=None):
+def build_message(to, subject, body, source=None, thread_ids=None):
     s = config.sender()
     m = EmailMessage()
     m["From"] = f"{s['prenom']} {s['nom']} <{s['email']}>"
@@ -172,6 +201,9 @@ def build_message(to, subject, body, source=None):
     m["Date"] = formatdate(localtime=True)
     m["Message-ID"] = make_msgid(domain=s["email"].split("@")[-1])
     m["List-Unsubscribe"] = f"<mailto:{s['email']}?subject=STOP>"
+    if thread_ids:  # relance : répond au premier mail, pour rester dans le même fil
+        m["In-Reply-To"] = thread_ids[-1]
+        m["References"] = " ".join(thread_ids)
     m.set_content(body + "\n" + signature(source))
     return m
 

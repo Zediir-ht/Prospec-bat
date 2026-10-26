@@ -8,7 +8,7 @@ from datetime import datetime, timedelta
 from email.header import decode_header, make_header
 from email.utils import getaddresses, parseaddr
 
-from . import config, db
+from . import config, db, notify
 from .qualify import EMAIL_RE
 
 MONTHS = ["Jan", "Feb", "Mar", "Apr", "May", "Jun", "Jul", "Aug", "Sep", "Oct", "Nov", "Dec"]
@@ -117,6 +117,7 @@ def process(con, msg):
     con.execute("UPDATE companies SET status='replied', reply_at=?, reply_snippet=? WHERE siren=?",
                 (db.now(), snippet, row["siren"]))
     con.commit()
+    notify.notify(f"Réponse de {row['enseigne'] or row['nom']}", snippet or "Nouvelle réponse reçue")
     return "replied"
 
 

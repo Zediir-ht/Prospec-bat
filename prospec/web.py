@@ -1,5 +1,7 @@
 """Dashboard mobile : valider les mails du jour, voir les stats, gérer les désinscriptions."""
 import hmac
+import re
+from datetime import datetime
 import random
 import threading
 import time
@@ -7,7 +9,7 @@ from urllib.parse import quote_plus
 
 from flask import Flask, abort, jsonify, redirect, render_template_string, request, session, url_for
 
-from . import cli, config, db, inbox, mailer
+from . import cli, config, db, inbox, mailer, stats as statsmod
 
 app = Flask(__name__)
 app.secret_key = config.env("DASHBOARD_SECRET") or config.env("DASHBOARD_PASSWORD", "change-me")
@@ -149,7 +151,7 @@ LOGIN = """<div class="block"><h2>Appuyez sur Start</h2><form method="post"><lab
 {% if err %}<p style="color:var(--brick)">Mot de passe incorrect</p>{% endif %}<div class="row"><button class="ok">▶ Start</button></div></form></div>"""
 
 HOME = """<div class="block quest" style="--n:{{limit}}"><h2>Quête du jour</h2>
-<p><b>{{today}}</b> / {{limit}} mails envoyés aujourd'hui</p>
+<p><b>{{today}}</b> / {{limit}} mails envoyés aujourd'hui</p>{% if ramp %}<p class="mut" style="margin-top:8px;font-weight:600">{{ramp}}</p>{% endif %}
 <div class="bar">{% for i in range(limit) %}<i class="{{'on' if i < today}}" style="animation-delay:{{i*60}}ms"></i>{% endfor %}</div></div>
 <div class="grid">
 {% for label,n in stats %}<div class="block stat"><b>{{n}}</b><span>{{label}}</span></div>{% endfor %}</div>
@@ -176,7 +178,8 @@ DRAFT = """{% if sending or send_log %}<div class="block" style="--c:var(--green
 {% if rows and not sending %}<div class="block" style="--c:var(--green)"><h2>{{rows|length}} mails prêts</h2>
 {% if left %}<p class="mut">Envoie {{[rows|length, left]|min}} mail(s), avec vos modifications à l'écran, espacés de quelques secondes.{% if rows|length > left %} Quota du jour : {{left}} envoi(s) restant(s), les autres partiront demain.{% endif %}</p>
 <form method="post" action="{{url_for('send_all')}}" id="sendall"><div class="row"><button class="btn big ok" data-confirm="Appuyez encore pour confirmer l'envoi de {{[rows|length, left]|min}} mail(s)">✉ Tout envoyer ({{[rows|length, left]|min}})</button></div></form>
-{% else %}<p class="mut">Quota du jour atteint ({{limit}} mails envoyés aujourd'hui). Ces mails pourront partir demain. Pour envoyer davantage par jour, augmentez DAILY_LIMIT dans le fichier .env.</p>{% endif %}</div>{% endif %}
+{% else %}<p class="mut">Quota du jour atteint ({{limit}} mails envoyés aujourd'hui). Ces mails pourront partir demain.</p>{% endif %}
+{% if ramp %}<p class="mut" style="margin-top:8px">{{ramp}}</p>{% endif %}</div>{% endif %}
 <script>
 /* Confirmation dans la page (les fenêtres de confirmation sont parfois bloquées par le navigateur) :
    1er appui -> le bouton demande confirmation, 2e appui -> envoi. */
@@ -220,7 +223,54 @@ SENT = """<form class="block" style="--c:var(--blue)" method="post" action="{{ur
 <button name="s" value="replied" class="ok">★ A répondu</button><button name="s" value="refused" class="ko">Refus</button></div></form>{% endif %}</div>
 {% else %}<div class="block idle"><i class="bot"></i><span class="mut">Rien d'envoyé pour l'instant.</span></div>{% endfor %}"""
 
-TABS = [("home", "Accueil"), ("write", "À rédiger"), ("drafts", "À valider"), ("sent", "Envoyés")]
+FOLLOW = """<div class="block" style="--c:var(--yellow)"><h2>{{rows|length}} à relancer</h2>
+<p class="mut">Sans réponse depuis {{days}} jours. Une seule relance par entreprise, dans le même fil que votre premier mail. Le texte est modifiable.</p>
+{% if rows %}<div class="row"><button class="btn" id="copyf" type="button">⧉ Faire écrire les relances par Claude</button></div>
+<textarea id="fprompt" readonly hidden>{{prompt}}</textarea><p class="mut" id="fcopied" hidden>Copié. Collez-la dans Claude, puis sa réponse ci-dessous.</p>
+<form method="post" action="{{url_for('import_followups')}}"><textarea name="text" aria-label="Réponse de Claude" placeholder="Réponse de Claude (facultatif) : collez ici le tableau JSON" style="min-height:90px"></textarea>
+<div class="row"><button class="ok">⬇ Importer les relances</button></div></form>{% endif %}
+{% if ramp %}<p class="mut" style="margin-top:10px">{{ramp}}</p>{% endif %}</div>
+<script>var cf=document.getElementById("copyf");if(cf)cf.addEventListener("click",function(){var t=document.getElementById("fprompt");
+function done(){document.getElementById("fcopied").hidden=false}
+if(navigator.clipboard&&navigator.clipboard.writeText){navigator.clipboard.writeText(t.value).then(done,function(){t.hidden=false;t.select()})}else{t.hidden=false;t.select();document.execCommand("copy");done()}});
+document.addEventListener("click",function(e){var b=e.target.closest("button[data-confirm]");if(!b)return;
+if(b.dataset.armed!=="1"){e.preventDefault();b.dataset.armed="1";b.dataset.label=b.textContent;b.textContent=b.dataset.confirm;b.classList.add("armed");
+setTimeout(function(){if(b.dataset.armed==="1"){b.dataset.armed="";b.textContent=b.dataset.label;b.classList.remove("armed")}},6000)}});</script>
+{% for c in rows %}<div class="block"><h2>{{c.enseigne or c.nom}}</h2><span class="tag">{{c.commune}}</span><span class="tag warm">premier mail le {{c.contacted_at|frdate}}</span>
+<div class="mut" style="margin-top:6px">{{c.email}}</div>
+<form method="post" action="{{url_for('followup_action',siren=c.siren)}}"><input name="subject" aria-label="Objet" value="{{c.f_subject}}" style="margin-top:10px">
+<textarea name="body" aria-label="Message" style="min-height:170px">{{c.f_body}}</textarea>
+<p class="mut" style="margin:10px 0 4px">Ajouté automatiquement en bas du mail :</p><pre class="sig">{{sig(c.email_source)}}</pre>
+<div class="row"><button name="act" value="send" class="ok" data-confirm="Confirmer la relance à {{c.email}}">✉ Relancer</button>
+<button name="act" value="save" class="btn gh">Enregistrer</button><button name="act" value="skip" class="ko">Ne pas relancer</button></div></form></div>
+{% else %}<div class="block idle"><i class="bot"></i><span class="mut">Aucune relance à faire. Les mails sans réponse après {{days}} jours apparaîtront ici.</span></div>{% endfor %}"""
+
+PIPE = """<div class="block" style="--c:var(--green)"><h2>Suivi des prospects</h2>
+<p class="mut">Les entreprises qui ont répondu, de la première réponse jusqu'au client. Ajoutez une note et une date de rappel.</p></div>
+{% for c in rows %}<div class="block" style="--c:var({{ {'client':'--green','lost':'--red','meeting':'--yellow','mockup':'--blue'}.get(c.stage_key,'--red') }})">
+<h2>{{c.enseigne or c.nom}}</h2><span class="tag {{ {'client':'good','lost':'hot','meeting':'warm'}.get(c.stage_key,'') }}">{{stage_names[c.stage_key]}}</span>
+<span class="tag">{{c.commune}}</span>{% if c.due %}<span class="tag hot">Rappel : {{c.reminder|frshort}}</span>{% elif c.reminder %}<span class="tag warm">Rappel le {{c.reminder|frshort}}</span>{% endif %}
+<div class="mut" style="margin-top:6px"><a href="mailto:{{c.email}}">{{c.email}}</a></div>
+{% if c.reply_snippet %}<pre class="sig" style="margin-top:10px;padding-top:12px">« {{c.reply_snippet}} »</pre>{% endif %}
+<form method="post" action="{{url_for('pipeline_action',siren=c.siren)}}">
+<textarea name="notes" aria-label="Notes" placeholder="Notes (ce qui a été dit, ce qu'il faut faire…)" style="min-height:90px">{{c.notes or ''}}</textarea>
+<label class="mut" for="r{{c.siren}}" style="display:block;margin-top:10px">Me le rappeler le :</label>
+<input type="date" id="r{{c.siren}}" name="reminder" value="{{c.reminder or ''}}" style="margin-top:4px">
+<div class="row"><button name="stage" value="mockup" class="btn">Maquette envoyée</button><button name="stage" value="meeting" class="btn">Rendez-vous</button>
+<button name="stage" value="client" class="ok">★ Client</button><button name="stage" value="lost" class="ko">Perdu</button><button name="stage" value="keep" class="btn gh">Enregistrer</button></div></form></div>
+{% else %}<div class="block idle"><i class="bot"></i><span class="mut">Personne à suivre pour l'instant. Les réponses apparaissent ici dès que quelqu'un répond.</span></div>{% endfor %}"""
+
+STATS = """<div class="grid">
+{% for label,n,c in tiles %}<div class="block stat" style="--c:var({{c}})"><b>{{n}}</b><span>{{label}}</span></div>{% endfor %}</div>
+{% if not data.total.sent %}<div class="block idle"><i class="bot"></i><span class="mut">Pas encore de statistiques : elles apparaissent après vos premiers envois.</span></div>{% endif %}
+{% for title, lines in data.groups if lines %}<div class="block" style="--c:var(--blue)"><h2>{{title}}</h2>
+{% for l in lines %}<div style="margin:10px 0 0"><div style="display:flex;justify-content:space-between;gap:10px;font:700 14px/1.3 var(--display)"><span>{{l.label}}{% if l.sent < 5 %} <span class="tag" style="margin:0 0 0 4px;padding:3px 7px">peu de données</span>{% endif %}</span>
+<span class="mut" style="white-space:nowrap">{{l.replied}}/{{l.sent}} · {{l.rate}} %</span></div>
+<div style="height:14px;border-radius:999px;background:var(--soft);box-shadow:inset 0 0 0 2px #c9d3f0;margin-top:5px;overflow:hidden"><i style="display:block;height:100%;width:{{[l.rate,3]|max}}%;border-radius:999px;background:var(--green)"></i></div></div>{% endfor %}</div>{% endfor %}
+<p class="mut" style="text-align:center">Taux de réponse = réponses / mails reçus. Les adresses en erreur ne comptent pas.</p>"""
+
+TABS = [("home", "Accueil"), ("write", "À rédiger"), ("drafts", "À valider"), ("followups", "À relancer"),
+        ("sent", "Envoyés"), ("pipeline", "Suivi"), ("stats", "Stats")]
 MODES = [("review", "Review (je valide ici)"), ("draft", "Brouillons Gmail"), ("send", "Envoi direct")]
 MODE_SHORT = {"review": "Review", "draft": "Gmail", "send": "Auto"}
 
@@ -234,15 +284,48 @@ def hud_counts(con):
 def page(body, tab="home", con=None):
     mode = db.send_mode(con) if con else ""
     hud = hud_counts(con) if con else None
-    counts = {"write": len(cli.next_to_write(con)), "drafts": hud["drafted"]} if con else {}
+    counts = {}
+    if con:
+        counts = {"write": len(cli.next_to_write(con)), "drafts": hud["drafted"], "followups": len(due_followups(con)),
+                  "pipeline": len(pipeline_todo(con))}
     return render_template_string(PAGE, css=CSS.replace("{{bot}}", BOT), body=body, tab=tab, tabs=TABS, hud=hud,
                                   mode_short=MODE_SHORT.get(mode, ""), counts=counts, msg=session.pop("msg", ""))
 
 
 def sent_today(con):
-    return con.execute(
-        "SELECT COUNT(*) FROM companies WHERE status IN ('sent','followed_up','replied','refused') "
-        "AND substr(contacted_at, 1, 10) = date('now', 'localtime')").fetchone()[0]
+    return db.sent_today(con)
+
+
+STAGES = {"replied": "À recontacter", "mockup": "Maquette envoyée", "meeting": "Rendez-vous", "client": "Client", "lost": "Perdu"}
+
+
+def due_followups(con):
+    return db.due_followups(con, int(config.env("FOLLOWUP_DAYS", "7")))
+
+
+def pipeline_rows(con):
+    """Entreprises qui ont répondu, avec leur étape ; celles qui demandent une action d'abord."""
+    today = datetime.now().strftime("%Y-%m-%d")
+    out = []
+    for r in con.execute("SELECT * FROM companies WHERE status='replied' ORDER BY COALESCE(reply_at, contacted_at) DESC").fetchall():
+        c = dict(r)
+        c["stage_key"] = c["stage"] if c["stage"] in STAGES else "replied"
+        c["due"] = bool(c["reminder"]) and c["reminder"] <= today and c["stage_key"] not in ("client", "lost")
+        out.append(c)
+    order = {"replied": 0, "meeting": 1, "mockup": 2, "client": 3, "lost": 4}
+    out.sort(key=lambda c: (not c["due"], order[c["stage_key"]]))
+    return out
+
+
+def pipeline_todo(con):
+    return [c for c in pipeline_rows(con) if c["due"] or c["stage_key"] == "replied"]
+
+
+@app.template_filter("frshort")
+def frshort(value):
+    """« 2026-10-28 » -> « 28/10 »."""
+    v = value or ""
+    return f"{v[8:10]}/{v[5:7]}" if len(v) >= 10 else v
 
 
 @app.template_filter("frdate")
@@ -296,12 +379,30 @@ def index():
     if tab == "drafts":
         rows = con.execute("SELECT * FROM companies WHERE status='drafted' ORDER BY contacted_at").fetchall()
         body = render_template_string(DRAFT, rows=rows, sig=mailer.signature, sending=_send["running"], send_log=_send["log"],
-                                      left=max(0, cli.target() - sent_today(con)), limit=cli.target())
+                                      left=max(0, cli.daily_quota(con) - sent_today(con)), limit=cli.daily_quota(con), ramp=cli.ramp_text(con))
     elif tab == "write":
         batch = cli.next_to_write(con)[: int(config.env("DAILY_LIMIT", "10"))]
         body = render_template_string(
             WRITE, auto=bool(config.env("ANTHROPIC_API_KEY")), n=len(cli.next_to_write(con)), batch=batch,
             prompt=mailer.batch_prompt([dict(r) for r in batch]) if batch else "")
+    elif tab == "followups":
+        rows = []
+        for r in due_followups(con):
+            c = dict(r)
+            c["f_subject"], c["f_body"] = (r["followup_subject"], r["followup_body"]) if r["followup_body"] else mailer.followup_mail(c)
+            rows.append(c)
+        body = render_template_string(
+            FOLLOW, rows=rows, sig=mailer.signature, days=config.env("FOLLOWUP_DAYS", "7"), ramp=cli.ramp_text(con),
+            prompt=mailer.batch_followup_prompt([dict(r) for r in rows[:10]]) if rows else "")
+    elif tab == "pipeline":
+        body = render_template_string(PIPE, rows=pipeline_rows(con), stage_names=STAGES)
+    elif tab == "stats":
+        data = statsmod.compute(con)
+        t = data["total"]
+        tiles = [("mails reçus", t["sent"], "--blue"), ("réponses", t["replied"], "--green"), ("taux de réponse", f"{t['rate']} %", "--yellow"),
+                 ("demandes STOP", t["stop"], "--red"), ("adresses en erreur", t["bounced"], "--red"),
+                 ("clients", con.execute("SELECT COUNT(*) FROM companies WHERE stage='client'").fetchone()[0], "--green")]
+        body = render_template_string(STATS, data=data, tiles=tiles)
     elif tab == "sent":
         rows = con.execute(
             "SELECT * FROM companies WHERE status IN ('sent','followed_up','replied','bounced') "
@@ -314,7 +415,7 @@ def index():
         stats = [("entreprises en base", sum(counts.values())), ("adresses en stock", len(cli.next_to_write(con))),
                  ("à valider", counts.get("drafted", 0)), ("envoyés", counts.get("sent", 0) + counts.get("followed_up", 0)),
                  ("réponses", counts.get("replied", 0)), ("refus", counts.get("refused", 0))]
-        body = render_template_string(HOME, stats=stats, modes=MODES, mode=db.send_mode(con), running=_job["running"], log=_job["log"], limit=cli.target(), today=min(sent_today(con), cli.target()))
+        body = render_template_string(HOME, stats=stats, modes=MODES, mode=db.send_mode(con), running=_job["running"], log=_job["log"], limit=cli.daily_quota(con), today=min(sent_today(con), cli.daily_quota(con)), ramp=cli.ramp_text(con))
     return page(body, tab, con)
 
 
@@ -341,7 +442,8 @@ def draft_action(siren):
             try:
                 cli.send_now(con, row, subject, body)
             except ValueError as exc:
-                abort(409, str(exc))
+                con.commit()
+                session["msg"] = f"Envoi impossible : {exc}"
     con.commit()
     return redirect(url_for("index", tab="drafts"))
 
@@ -404,7 +506,7 @@ def _run_send_all():
     sent, errors = 0, []
     try:
         con = db.connect()
-        left = max(0, cli.target() - sent_today(con))
+        left = max(0, cli.daily_quota(con) - sent_today(con))
         rows = con.execute("SELECT * FROM companies WHERE status='drafted' ORDER BY contacted_at LIMIT ?", (left,)).fetchall()
         if not rows:
             _send["log"] = "Rien à envoyer : quota du jour atteint ou aucun mail prêt."
@@ -430,6 +532,62 @@ def _run_send_all():
         print(f"  ! envoi groupé interrompu : {exc}")
     finally:
         _send["running"] = False
+
+
+@app.post("/followup/<siren>")
+def followup_action(siren):
+    con = connect()
+    row = con.execute("SELECT * FROM companies WHERE siren=? AND status='sent' AND followup_at IS NULL", (siren,)).fetchone()
+    if not row:
+        abort(404)
+    act, subject, body = request.form.get("act"), request.form.get("subject", "").strip(), request.form.get("body", "").strip()
+    if act == "skip":
+        con.execute("UPDATE companies SET followup_at=? WHERE siren=?", (db.now(), siren))
+    elif act in ("save", "send"):
+        con.execute("UPDATE companies SET followup_subject=?, followup_body=? WHERE siren=?", (subject, body, siren))
+        con.commit()
+        if act == "send":
+            row = con.execute("SELECT * FROM companies WHERE siren=?", (siren,)).fetchone()
+            try:
+                cli.send_followup_now(con, row, subject, body)
+                session["msg"] = f"Relance envoyée à {row['enseigne'] or row['nom']}."
+            except ValueError as exc:
+                session["msg"] = f"Relance impossible : {exc}"
+    con.commit()
+    return redirect(url_for("index", tab="followups"))
+
+
+@app.post("/followups/import")
+def import_followups():
+    con = connect()
+    allowed = {r["siren"]: r["nom"] for r in due_followups(con)}
+    ok, errors = mailer.parse_batch(request.form.get("text", ""), allowed, min_len=40)
+    for siren, (subject, body) in ok.items():
+        con.execute("UPDATE companies SET followup_subject=?, followup_body=? WHERE siren=?", (subject, body, siren))
+    con.commit()
+    msg = f"{len(ok)} relance(s) importée(s)."
+    if errors:
+        msg += " Refusées : " + " ; ".join(errors[:5])
+    session["msg"] = msg
+    return redirect(url_for("index", tab="followups"))
+
+
+@app.post("/pipeline/<siren>")
+def pipeline_action(siren):
+    con = connect()
+    if not con.execute("SELECT 1 FROM companies WHERE siren=? AND status='replied'", (siren,)).fetchone():
+        abort(404)
+    stage = request.form.get("stage", "keep")
+    reminder = request.form.get("reminder", "").strip()
+    if reminder and not re.fullmatch(r"\d{4}-\d{2}-\d{2}", reminder):
+        reminder = ""
+    con.execute("UPDATE companies SET notes=?, reminder=? WHERE siren=?", (request.form.get("notes", "").strip(), reminder or None, siren))
+    if stage in STAGES and stage != "replied":
+        con.execute("UPDATE companies SET stage=? WHERE siren=?", (stage, siren))
+        if stage in ("client", "lost"):
+            con.execute("UPDATE companies SET reminder=NULL WHERE siren=?", (siren,))
+    con.commit()
+    return redirect(url_for("index", tab="pipeline"))
 
 
 @app.post("/mark/<siren>")
@@ -535,5 +693,25 @@ def cron(token):
     return jsonify(started=start_job())
 
 
+def start_inbox_poll():
+    """Vérifie la boîte Gmail toutes les INBOX_POLL_MINUTES minutes tant que le dashboard tourne : c'est ce qui
+    déclenche les notifications de réponse sans avoir à ouvrir l'application (0 pour désactiver)."""
+    minutes = int(config.env("INBOX_POLL_MINUTES", "15"))
+    if minutes <= 0 or not config.env("GMAIL_APP_PASSWORD"):
+        return
+
+    def loop():
+        time.sleep(30)
+        while True:
+            try:
+                print(inbox.summary(inbox.check(db.connect())))
+            except Exception as exc:
+                print(f"Vérification de la boîte impossible : {exc}")
+            time.sleep(minutes * 60)
+
+    threading.Thread(target=loop, daemon=True).start()
+
+
 if __name__ == "__main__":
+    start_inbox_poll()
     app.run(host="0.0.0.0", port=int(config.env("PORT", "8000")))

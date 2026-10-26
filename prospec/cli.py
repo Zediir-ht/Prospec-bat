@@ -5,7 +5,9 @@ import sys
 import time
 from concurrent.futures import FIRST_COMPLETED, ThreadPoolExecutor, wait
 
-from . import config, db, discovery, inbox, mailer, osm, qualify, sourcing
+from datetime import date
+
+from . import config, db, discovery, dnscheck, inbox, mailer, osm, qualify, sourcing
 
 
 def cmd_source(con, _):
@@ -44,6 +46,9 @@ def apply_result(con, row, res):
         res["email"], res["email_source"] = row["email"], row["email_source"] or "osm"
     else:
         res["email_source"] = None
+    if res["email"] and not dnscheck.email_ok(res["email"]):
+        print(f"  ! {res['email']} : le domaine ne reçoit pas de courrier, adresse écartée")
+        res["email"], res["email_source"] = None, None
     if res["site_status"] == "ok":
         status = "skip"  # site correct : hors cible
     elif res["site_status"] == "unknown":
@@ -138,6 +143,53 @@ def cmd_collect(con, args, stop=None, log=None):
     return tested, found
 
 
+RAMP_START, RAMP_DAYS = 3, 14  # on démarre à 3 mails par jour et on atteint DAILY_LIMIT en deux semaines
+
+
+def daily_quota(con):
+    """Nombre maximum de mails à envoyer aujourd'hui. Un Gmail qui passe d'un coup à 10 mails froids par jour
+    risque le spam : on monte progressivement (RAMP_UP=0 pour désactiver)."""
+    base = int(config.env("DAILY_LIMIT", "10"))
+    first = db.first_send_date(con)
+    if config.env("RAMP_UP", "1") == "0":
+        return base
+    if first is None:
+        return min(base, RAMP_START)
+    return min(base, RAMP_START + (date.today() - first).days // 2)
+
+
+def ramp_text(con):
+    """Texte d'explication de la montée en charge, vide une fois le quota plein atteint."""
+    base, quota = int(config.env("DAILY_LIMIT", "10")), daily_quota(con)
+    if quota >= base or config.env("RAMP_UP", "1") == "0":
+        return ""
+    first = db.first_send_date(con)
+    day = (date.today() - first).days + 1 if first else 1
+    return f"Montée en charge : {quota} mails par jour aujourd'hui (jour {day}), jusqu'à {base} par jour pour protéger votre adresse Gmail du spam."
+
+
+def check_can_send(con, row):
+    """Lève ValueError si ce mail ne doit pas partir maintenant."""
+    if db.is_suppressed(con, row["email"]):
+        raise ValueError(f"{row['email']} est désinscrite")
+    mailer.assert_sourced(row)
+    if not dnscheck.email_ok(row["email"]):
+        raise ValueError(f"{row['email']} : le domaine ne reçoit pas de courrier")
+    if db.sent_today(con) >= daily_quota(con):
+        raise ValueError(f"Quota du jour atteint ({daily_quota(con)} mails). {ramp_text(con)}".strip())
+
+
+def send_followup_now(con, row, subject, body):
+    """Envoie la relance dans le fil du premier mail. Lève ValueError si elle ne doit pas partir."""
+    check_can_send(con, row)
+    msg = mailer.build_message(row["email"], subject, body, row["email_source"], (row["message_ids"] or "").split())
+    mailer.send(msg)
+    remember_message(con, row["siren"], msg)
+    con.execute("UPDATE companies SET status='followed_up', followup_at=?, followup_subject=?, followup_body=? WHERE siren=?",
+                (db.now(), subject, body, row["siren"]))
+    db.log_send(con, row["siren"], "followup")
+
+
 def remember_message(con, siren, msg):
     """Garde l'identifiant du mail envoyé : les réponses le citent, ce qui permet de les reconnaître."""
     con.execute("UPDATE companies SET message_ids=TRIM(COALESCE(message_ids,'') || ' ' || ?) WHERE siren=?",
@@ -146,15 +198,13 @@ def remember_message(con, siren, msg):
 
 def send_now(con, row, subject, body):
     """Envoie tout de suite un mail validé (dashboard). Lève ValueError si l'adresse ne doit pas être contactée."""
-    if db.is_suppressed(con, row["email"]):
-        raise ValueError(f"{row['email']} est désinscrite")
-    mailer.assert_sourced(row)
+    check_can_send(con, row)
     msg = mailer.build_message(row["email"], subject, body, row["email_source"])
     mailer.send(msg)
     remember_message(con, row["siren"], msg)
     con.execute("UPDATE companies SET status='sent', subject=?, body=?, contacted_at=? WHERE siren=?",
                 (subject, body, db.now(), row["siren"]))
-    con.commit()
+    db.log_send(con, row["siren"], "first")
 
 
 def contact(con, row, subject, body, mode, followup=False):
@@ -163,6 +213,7 @@ def contact(con, row, subject, body, mode, followup=False):
         msg = mailer.build_message(row["email"], subject, body, row["email_source"])
         mailer.deliver(msg, mode)
         remember_message(con, row["siren"], msg)
+        db.log_send(con, row["siren"], "followup" if followup else "first")
     ts = db.now()
     if followup:
         con.execute("UPDATE companies SET status='followed_up', followup_at=? WHERE siren=?", (ts, row["siren"]))
@@ -185,18 +236,23 @@ def next_to_write(con):
 
 def cmd_run(con, args):
     mode, limit = db.send_mode(con), int(config.env("DAILY_LIMIT", "10"))
+    if mode == "send":
+        limit = max(0, daily_quota(con) - db.sent_today(con))
     if mode != "review" and not config.env("GMAIL_APP_PASSWORD"):
         sys.exit("GMAIL_APP_PASSWORD manquant dans .env")
     done = 0
-    # 1. relances à J+7 (comptent dans le quota quotidien)
+    # 1. relances à J+7 (comptent dans le quota quotidien), uniquement en envoi direct :
+    #    sinon elles passent par l'onglet « À relancer » du dashboard
     if mode == "send":
         for row in db.due_followups(con, int(config.env("FOLLOWUP_DAYS", "7"))):
             if done >= limit:
                 break
-            if db.is_suppressed(con, row["email"]):
+            subject, body = (row["followup_subject"], row["followup_body"]) if row["followup_body"] else mailer.followup_mail(dict(row))
+            try:
+                send_followup_now(con, row, subject, body)
+            except ValueError as exc:
+                print(f"relance ignorée : {exc}")
                 continue
-            subject, body = mailer.followup_mail(dict(row))
-            contact(con, row, subject, body, mode, followup=True)
             print(f"relance -> {row['nom']}")
             done += 1
             time.sleep(random.uniform(60, 240))

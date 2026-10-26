@@ -18,6 +18,7 @@ CREATE TABLE IF NOT EXISTS companies (
 );
 CREATE TABLE IF NOT EXISTS osm_places (osm_id TEXT PRIMARY KEY, dept TEXT, name TEXT, email TEXT, website TEXT, city TEXT, postcode TEXT);
 CREATE TABLE IF NOT EXISTS discovered (query TEXT PRIMARY KEY, done_at TEXT);
+CREATE TABLE IF NOT EXISTS send_log (ts TEXT, siren TEXT, kind TEXT);
 CREATE TABLE IF NOT EXISTS inbox_seen (uid TEXT PRIMARY KEY);
 CREATE TABLE IF NOT EXISTS sourced (dept TEXT, naf TEXT, PRIMARY KEY (dept, naf));
 CREATE TABLE IF NOT EXISTS settings (key TEXT PRIMARY KEY, value TEXT);
@@ -30,7 +31,8 @@ def connect(path=None):
     con = sqlite3.connect(path or DB_PATH)
     con.row_factory = sqlite3.Row
     con.executescript(SCHEMA)
-    for col in ("nature_juridique", "email_source", "enseigne", "message_ids", "reply_at", "reply_snippet"):  # colonnes ajoutées après la 1re version
+    for col in ("nature_juridique", "email_source", "enseigne", "message_ids", "reply_at", "reply_snippet",
+                "followup_subject", "followup_body", "stage", "notes", "reminder"):  # colonnes ajoutées après la 1re version
         try:
             con.execute(f"ALTER TABLE companies ADD COLUMN {col} TEXT")
         except sqlite3.OperationalError:
@@ -40,6 +42,10 @@ def connect(path=None):
     if not con.execute("SELECT 1 FROM settings WHERE key='sourced_v2'").fetchone():
         con.execute("DELETE FROM sourced")
         con.execute("INSERT INTO settings(key, value) VALUES('sourced_v2', '1')")
+    # historique des envois (quota du jour, montée en charge) reconstitué depuis les mails déjà envoyés
+    if not con.execute("SELECT 1 FROM send_log LIMIT 1").fetchone():
+        con.execute("INSERT INTO send_log SELECT contacted_at, siren, 'first' FROM companies WHERE contacted_at IS NOT NULL "
+                    "AND status IN ('sent','followed_up','replied','refused','bounced')")
     # avant l'ajout de email_source, toute adresse venait d'une lecture du site de l'entreprise
     con.execute("UPDATE companies SET email_source='site' WHERE email IS NOT NULL AND email_source IS NULL")
     con.commit()
@@ -89,3 +95,18 @@ def send_mode(con):
     """review (valider dans le dashboard) | draft (brouillons Gmail) | send (envoi direct)"""
     from .config import env
     return get_setting(con, "send_mode", env("SEND_MODE", "review"))
+
+
+def log_send(con, siren, kind="first"):
+    """Enregistre un envoi réel (premier mail ou relance) : sert au quota du jour et à la montée en charge."""
+    con.execute("INSERT INTO send_log(ts, siren, kind) VALUES (?, ?, ?)", (now(), siren, kind))
+    con.commit()
+
+
+def sent_today(con):
+    return con.execute("SELECT COUNT(*) FROM send_log WHERE substr(ts, 1, 10) = date('now', 'localtime')").fetchone()[0]
+
+
+def first_send_date(con):
+    row = con.execute("SELECT MIN(substr(ts, 1, 10)) FROM send_log").fetchone()[0]
+    return datetime.fromisoformat(row).date() if row else None

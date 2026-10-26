@@ -87,15 +87,19 @@ def test_send_all(client, monkeypatch):
     login(client)
     page = client.get("/?tab=drafts").data.decode()
     assert "Tout envoyer (2)" in page
-    monkeypatch.setattr(web, "start_job", lambda target=None: target() or True)  # exécution immédiate
-    web._job["running"] = True
+    web._job["running"] = True  # une collecte en cours ne doit pas bloquer l'envoi
+    assert "Tout envoyer (2)" in client.get("/?tab=drafts").data.decode()
+    monkeypatch.setattr(web, "start_send", lambda: web._send.update(running=True) or web._run_send_all() or True)
     client.post("/send-all", data={"subject_5": "Objet modifié", "body_5": "Corps modifié"})
+    web._job["running"] = False
     assert sorted(m["To"] for m in sent) == ["a@dupont.fr", "b@bru.fr"]
     assert any(m["Subject"] == "Objet modifié" for m in sent)
-    assert "2 mail(s) envoyé(s)." == web._job["log"]
+    assert web._send["log"] == "2 mail(s) envoyé(s)." and not web._send["running"]
+    assert "2 mail(s) envoyé(s)." in client.get("/?tab=drafts").data.decode()
 
 
 def test_send_all_respects_daily_quota(client, monkeypatch):
+    login(client)
     sent = []
     monkeypatch.setattr(web.mailer, "send", sent.append)
     monkeypatch.setenv("SEND_SPACING", "0,0")
@@ -104,9 +108,10 @@ def test_send_all_respects_daily_quota(client, monkeypatch):
     con.execute("UPDATE companies SET email_source='site'")
     con.execute("INSERT INTO companies(siren,nom,email,email_source,status,contacted_at) VALUES('6','A','a@a.fr','site','drafted','2026-01-03')")
     con.commit()
-    web._job["running"] = True
     web._run_send_all()
     assert len(sent) == 1
+    page = client.get("/?tab=drafts").data.decode()  # quota atteint : raison affichée
+    assert "Quota du jour atteint" in page
 
 
 def test_inbox_button(client, monkeypatch):

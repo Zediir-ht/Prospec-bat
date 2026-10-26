@@ -14,6 +14,7 @@ app.secret_key = config.env("DASHBOARD_SECRET") or config.env("DASHBOARD_PASSWOR
 app.config.update(SESSION_COOKIE_HTTPONLY=True, SESSION_COOKIE_SAMESITE="Lax", PERMANENT_SESSION_LIFETIME=60 * 60 * 24 * 30)
 
 _job = {"running": False, "log": "", "stop": False}
+_send = {"running": False, "log": "", "stop": False}  # envoi groupé, indépendant des recherches
 
 from urllib.parse import quote as _q
 
@@ -110,6 +111,8 @@ button[disabled]{opacity:.7;cursor:wait}
 .btn.big{font-size:18px;padding:17px 20px 18px;width:100%;text-align:center;background:var(--yellow);color:var(--ink);box-shadow:0 0 0 3px var(--line),0 6px 0 3px var(--yellow2),inset 0 4px 0 #fff8}
 pre.sig{font:600 14px/1.45 var(--body);color:var(--mut);background:var(--soft);border-radius:16px;padding:4px 14px 12px;margin:0}
 .btn.big.ok{background:var(--green);color:#fff;box-shadow:0 0 0 3px var(--line),0 6px 0 3px var(--green2),inset 0 4px 0 #fff6}
+button.armed{background:var(--yellow)!important;color:var(--ink)!important;box-shadow:0 0 0 3px var(--line),0 5px 0 3px var(--yellow2)!important}
+.log{white-space:pre-wrap;font:700 15px/1.5 var(--display);color:var(--blue2);margin:0}
 pre{white-space:pre-wrap;font:700 14px/1.5 var(--display);margin:12px 0 0;color:var(--blue2)}
 a{color:var(--blue2);font-weight:700}
 .msg{background:#e3fbea;font:700 15px/1.4 var(--display);display:flex;gap:10px;align-items:center}
@@ -166,20 +169,31 @@ HOME = """<div class="block quest" style="--n:{{limit}}"><h2>Quête du jour</h2>
 
 SITE = "{{ {'none':'pas de site','outdated':'site à refaire'}.get(c.site_status,c.site_status) }}"
 
-DRAFT = """{% if rows %}<div class="block" style="--c:var(--green)"><h2>{{rows|length}} mails prêts</h2>
-<p class="mut">Envoie tous les mails ci-dessous, avec vos modifications, espacés de quelques secondes.{% if rows|length > left %} Quota du jour : {{left}} envoi(s) restant(s), les autres attendront demain.{% endif %}</p>
-<form method="post" action="{{url_for('send_all')}}" id="sendall"><div class="row"><button class="btn big ok" {{'disabled' if running or not left}}>✉ Tout envoyer ({{[rows|length, left]|min}})</button></div></form></div>
-<script>document.getElementById("sendall").addEventListener("submit",function(e){
-var f=this,n={{[rows|length, left]|min}};if(!confirm("Envoyer "+n+" mail(s) maintenant ?")){e.preventDefault();return}
+DRAFT = """{% if sending or send_log %}<div class="block" style="--c:var(--green)"><h2>Envoi groupé</h2>
+<p class="log">{{send_log}}</p>{% if sending %}<div class="runner" aria-hidden="true"><i class="bot"></i></div>
+<form method="post" action="{{url_for('stop_send')}}"><div class="row"><button class="ko">■ Arrêter l'envoi</button></div></form>
+<script>setTimeout(function(){location.reload()},8000)</script>{% endif %}</div>{% endif %}
+{% if rows and not sending %}<div class="block" style="--c:var(--green)"><h2>{{rows|length}} mails prêts</h2>
+{% if left %}<p class="mut">Envoie {{[rows|length, left]|min}} mail(s), avec vos modifications à l'écran, espacés de quelques secondes.{% if rows|length > left %} Quota du jour : {{left}} envoi(s) restant(s), les autres partiront demain.{% endif %}</p>
+<form method="post" action="{{url_for('send_all')}}" id="sendall"><div class="row"><button class="btn big ok" data-confirm="Appuyez encore pour confirmer l'envoi de {{[rows|length, left]|min}} mail(s)">✉ Tout envoyer ({{[rows|length, left]|min}})</button></div></form>
+{% else %}<p class="mut">Quota du jour atteint ({{limit}} mails envoyés aujourd'hui). Ces mails pourront partir demain. Pour envoyer davantage par jour, augmentez DAILY_LIMIT dans le fichier .env.</p>{% endif %}</div>{% endif %}
+<script>
+/* Confirmation dans la page (les fenêtres de confirmation sont parfois bloquées par le navigateur) :
+   1er appui -> le bouton demande confirmation, 2e appui -> envoi. */
+document.addEventListener("click",function(e){var b=e.target.closest("button[data-confirm]");if(!b)return;
+if(b.dataset.armed!=="1"){e.preventDefault();b.dataset.armed="1";b.dataset.label=b.textContent;b.textContent=b.dataset.confirm;b.classList.add("armed");
+setTimeout(function(){if(b.dataset.armed==="1"){b.dataset.armed="";b.textContent=b.dataset.label;b.classList.remove("armed")}},6000)}});
+var sa=document.getElementById("sendall");if(sa)sa.addEventListener("submit",function(){var f=this;
 document.querySelectorAll("form[data-siren]").forEach(function(d){["subject","body"].forEach(function(k){
-var i=document.createElement("input");i.type="hidden";i.name=k+"_"+d.dataset.siren;i.value=d.elements[k].value;f.appendChild(i)})})});</script>{% endif %}
+var i=document.createElement("input");i.type="hidden";i.name=k+"_"+d.dataset.siren;i.value=d.elements[k].value;f.appendChild(i)})})});
+</script>
 {% for c in rows %}<div class="block"><h2>{{c.enseigne or c.nom}}</h2>
 <span class="tag">{{c.commune}}</span><span class="tag">{{c.metier}}</span><span class="tag {{'hot' if c.site_status=='none' else 'warm'}}">""" + SITE + """</span>
 <div class="mut" style="margin-top:6px">{{c.email}}{% if c.site_url %} · <a href="{{c.site_url}}" target="_blank" rel="noopener">voir le site</a>{% endif %}</div>
 <form method="post" action="{{url_for('draft_action',siren=c.siren)}}" data-siren="{{c.siren}}"><input name="subject" aria-label="Objet" value="{{c.subject}}" style="margin-top:10px">
 <textarea name="body" aria-label="Message">{{c.body}}</textarea>
 <p class="mut" style="margin:10px 0 4px">Ajouté automatiquement en bas du mail :</p><pre class="sig">{{sig(c.email_source)}}</pre><div class="row">
-<button name="act" value="send" class="ok" onclick="return confirm('Envoyer ce mail à {{c.email}} ?')">✉ Envoyer</button>
+<button name="act" value="send" class="ok" data-confirm="Confirmer l'envoi à {{c.email}}">✉ Envoyer</button>
 <button name="act" value="save" class="btn gh">Enregistrer</button><button name="act" value="skip" class="ko">Ignorer</button></div></form></div>
 {% else %}<div class="block idle"><i class="bot"></i><span class="mut">Aucun mail en attente. Passez par « À rédiger », ou lancez « Préparer les mails du jour » depuis l'accueil.</span></div>{% endfor %}"""
 
@@ -281,8 +295,8 @@ def index():
     con = connect()
     if tab == "drafts":
         rows = con.execute("SELECT * FROM companies WHERE status='drafted' ORDER BY contacted_at").fetchall()
-        body = render_template_string(DRAFT, rows=rows, sig=mailer.signature, running=_job["running"],
-                                      left=max(0, cli.target() - sent_today(con)))
+        body = render_template_string(DRAFT, rows=rows, sig=mailer.signature, sending=_send["running"], send_log=_send["log"],
+                                      left=max(0, cli.target() - sent_today(con)), limit=cli.target())
     elif tab == "write":
         batch = cli.next_to_write(con)[: int(config.env("DAILY_LIMIT", "10"))]
         body = render_template_string(
@@ -366,33 +380,56 @@ def send_all():
         if subject is not None and body is not None:
             con.execute("UPDATE companies SET subject=?, body=? WHERE siren=?", (subject, body, r["siren"]))
     con.commit()
-    if start_job(_run_send_all):
-        session["msg"] = "Envoi en cours : suivez la progression ci-dessous."
-    return redirect(url_for("index"))
+    if not start_send():
+        session["msg"] = "Un envoi est déjà en cours."
+    return redirect(url_for("index", tab="drafts"))
+
+
+@app.post("/send/stop")
+def stop_send():
+    _send["stop"] = True
+    _send["log"] = "Arrêt demandé : fin après le mail en cours…"
+    return redirect(url_for("index", tab="drafts"))
+
+
+def start_send():
+    if _send["running"]:
+        return False
+    _send.update(running=True, stop=False, log="Préparation de l'envoi…")
+    threading.Thread(target=_run_send_all, daemon=True).start()
+    return True
 
 
 def _run_send_all():
-    con = db.connect()
+    sent, errors = 0, []
     try:
+        con = db.connect()
         left = max(0, cli.target() - sent_today(con))
         rows = con.execute("SELECT * FROM companies WHERE status='drafted' ORDER BY contacted_at LIMIT ?", (left,)).fetchall()
-        sent, errors = 0, []
+        if not rows:
+            _send["log"] = "Rien à envoyer : quota du jour atteint ou aucun mail prêt."
+            return
         for i, row in enumerate(rows):
-            if _job["stop"]:
+            if _send["stop"]:
                 break
             if i:  # espace les envois : un envoi en rafale ressemble à du spam
                 pause = random.uniform(*(float(x) for x in config.env("SEND_SPACING", "15,40").split(",")))
-                _job["log"] = f"Envoi {sent}/{len(rows)}… prochain dans {int(pause)} s"
+                _send["log"] = f"{sent}/{len(rows)} envoyé(s)… prochain dans {int(pause)} s"
                 time.sleep(pause)
             try:
                 cli.send_now(con, row, row["subject"], row["body"])
                 sent += 1
+                print(f"envoyé -> {row['email']}")
             except Exception as exc:
                 errors.append(f"{row['enseigne'] or row['nom']} : {exc}")
-            _job["log"] = f"Envoi {sent}/{len(rows)}…"
-        _job["log"] = f"{sent} mail(s) envoyé(s)." + (" Erreurs : " + " ; ".join(errors) if errors else "")
+                print(f"  ! échec d'envoi à {row['email']} : {exc}")
+            _send["log"] = f"{sent}/{len(rows)} envoyé(s)…"
+        _send["log"] = f"{sent} mail(s) envoyé(s)." + (" Erreurs : " + " ; ".join(errors) if errors else "")
+    except Exception as exc:  # erreur imprévue : on l'affiche au lieu de s'arrêter en silence
+        _send["log"] = f"Envoi interrompu après {sent} mail(s) : {exc}"
+        print(f"  ! envoi groupé interrompu : {exc}")
     finally:
-        _job["running"] = False
+        _send["running"] = False
 
 
 @app.post("/mark/<siren>")

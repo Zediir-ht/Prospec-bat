@@ -35,7 +35,8 @@ def test_drafts_and_skip(client):
     login(client)
     assert b"DUPONT" in client.get("/?tab=drafts").data
     client.post("/draft/1", data={"act": "skip"})
-    assert b"DUPONT" not in client.get("/?tab=drafts").data
+    page = client.get("/?tab=drafts").data.decode()
+    assert 'data-siren="1"' not in page and "DUPONT ignorée." in page  # carte retirée, notification affichée
 
 
 def test_send_calls_mailer(client, monkeypatch):

@@ -94,3 +94,6 @@ La recherche teste `WORKERS` (20) entreprises en parallèle : la lecture des sit
 - **Suivi** : à chaque réponse, étapes « À recontacter → Maquette envoyée → Rendez-vous → Client / Perdu », avec note et date de rappel. Le nombre de rappels échus s'affiche sur l'onglet.
 - **Notifications** : à chaque réponse, notification Termux (installer l'application Termux:API et `pkg install termux-api`) et/ou ntfy.sh (`NTFY_TOPIC`). La boîte Gmail est vérifiée toutes les `INBOX_POLL_MINUTES` minutes tant que le dashboard tourne.
 - **Stats** : taux de réponse par constat sur le site, métier, commune, jour d'envoi et origine de l'adresse. Moins de 5 envois = « peu de données ».
+
+## Interface
+Barre d'onglets en bas (Accueil, Rédiger, Valider, Relancer, Plus → Envoyés, Suivi, Stats), en-tête compact au défilement, cartes de mail repliées (toucher pour modifier ; glisser à droite pour envoyer, à gauche pour ignorer), frise d'étapes dans le Suivi, carte « Ce qui marche le mieux » dans les Stats, notifications qui disparaissent seules, pièces à chaque envoi et confettis pour un nouveau client. Gabarits et styles : `prospec/ui.py`. Icône d'application : `prospec/static/icon-*.png`.

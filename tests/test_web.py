@@ -98,20 +98,21 @@ def test_send_all(client, monkeypatch):
     assert "2 mail(s) envoyé(s)." in client.get("/?tab=drafts").data.decode()
 
 
-def test_send_all_respects_daily_quota(client, monkeypatch):
-    login(client)
+def test_send_all_has_no_quota(client, monkeypatch):
     sent = []
     monkeypatch.setattr(web.mailer, "send", sent.append)
     monkeypatch.setenv("SEND_SPACING", "0,0")
-    monkeypatch.setenv("DAILY_LIMIT", "1")
+    monkeypatch.setenv("DAILY_LIMIT", "1")  # objectif de lot seulement
     con = db.connect()
     con.execute("UPDATE companies SET email_source='site'")
-    con.execute("INSERT INTO companies(siren,nom,email,email_source,status,contacted_at) VALUES('6','A','a@a.fr','site','drafted','2026-01-03')")
+    for i in (6, 7, 8):
+        con.execute("INSERT INTO companies(siren,nom,email,email_source,status,contacted_at,subject,body) VALUES(?,?,?,?,?,?,?,?)",
+                    (str(i), f"N{i}", f"a{i}@a{i}.fr", "site", "drafted", "2026-01-03", "Objet", "Corps du mail"))
     con.commit()
+    login(client)
+    assert "Tout envoyer (4)" in client.get("/?tab=drafts").data.decode()
     web._run_send_all()
-    assert len(sent) == 1
-    page = client.get("/?tab=drafts").data.decode()  # quota atteint : raison affichée
-    assert "Quota du jour atteint" in page
+    assert len(sent) == 4 and web._send["log"] == "4 mail(s) envoyé(s)."
 
 
 def test_inbox_button(client, monkeypatch):

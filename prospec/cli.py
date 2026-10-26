@@ -5,8 +5,6 @@ import sys
 import time
 from concurrent.futures import FIRST_COMPLETED, ThreadPoolExecutor, wait
 
-from datetime import date
-
 from . import config, db, discovery, dnscheck, inbox, mailer, osm, qualify, sourcing
 
 
@@ -143,45 +141,20 @@ def cmd_collect(con, args, stop=None, log=None):
     return tested, found
 
 
-RAMP_START, RAMP_DAYS = 3, 14  # on démarre à 3 mails par jour et on atteint DAILY_LIMIT en deux semaines
-
-
-def daily_quota(con):
-    """Nombre maximum de mails à envoyer aujourd'hui. Un Gmail qui passe d'un coup à 10 mails froids par jour
-    risque le spam : on monte progressivement (RAMP_UP=0 pour désactiver)."""
-    base = int(config.env("DAILY_LIMIT", "10"))
-    first = db.first_send_date(con)
-    if config.env("RAMP_UP", "1") == "0":
-        return base
-    if first is None:
-        return min(base, RAMP_START)
-    return min(base, RAMP_START + (date.today() - first).days // 2)
-
-
-def ramp_text(con):
-    """Texte d'explication de la montée en charge, vide une fois le quota plein atteint."""
-    base, quota = int(config.env("DAILY_LIMIT", "10")), daily_quota(con)
-    if quota >= base or config.env("RAMP_UP", "1") == "0":
-        return ""
-    first = db.first_send_date(con)
-    day = (date.today() - first).days + 1 if first else 1
-    return f"Montée en charge : {quota} mails par jour aujourd'hui (jour {day}), jusqu'à {base} par jour pour protéger votre adresse Gmail du spam."
-
-
-def check_can_send(con, row):
-    """Lève ValueError si ce mail ne doit pas partir maintenant."""
+def check_can_send(con, row, subject, body):
+    """Lève ValueError si ce mail ne doit pas partir (désinscrit, adresse non sourcée, domaine sans messagerie)."""
+    if not (subject or "").strip() or not (body or "").strip():
+        raise ValueError("l'objet ou le texte du mail est vide")
     if db.is_suppressed(con, row["email"]):
         raise ValueError(f"{row['email']} est désinscrite")
     mailer.assert_sourced(row)
     if not dnscheck.email_ok(row["email"]):
         raise ValueError(f"{row['email']} : le domaine ne reçoit pas de courrier")
-    if db.sent_today(con) >= daily_quota(con):
-        raise ValueError(f"Quota du jour atteint ({daily_quota(con)} mails). {ramp_text(con)}".strip())
 
 
 def send_followup_now(con, row, subject, body):
     """Envoie la relance dans le fil du premier mail. Lève ValueError si elle ne doit pas partir."""
-    check_can_send(con, row)
+    check_can_send(con, row, subject, body)
     msg = mailer.build_message(row["email"], subject, body, row["email_source"], (row["message_ids"] or "").split())
     mailer.send(msg)
     remember_message(con, row["siren"], msg)
@@ -198,7 +171,7 @@ def remember_message(con, siren, msg):
 
 def send_now(con, row, subject, body):
     """Envoie tout de suite un mail validé (dashboard). Lève ValueError si l'adresse ne doit pas être contactée."""
-    check_can_send(con, row)
+    check_can_send(con, row, subject, body)
     msg = mailer.build_message(row["email"], subject, body, row["email_source"])
     mailer.send(msg)
     remember_message(con, row["siren"], msg)
@@ -236,12 +209,10 @@ def next_to_write(con):
 
 def cmd_run(con, args):
     mode, limit = db.send_mode(con), int(config.env("DAILY_LIMIT", "10"))
-    if mode == "send":
-        limit = max(0, daily_quota(con) - db.sent_today(con))
     if mode != "review" and not config.env("GMAIL_APP_PASSWORD"):
         sys.exit("GMAIL_APP_PASSWORD manquant dans .env")
     done = 0
-    # 1. relances à J+7 (comptent dans le quota quotidien), uniquement en envoi direct :
+    # 1. relances à J+7, uniquement en envoi direct :
     #    sinon elles passent par l'onglet « À relancer » du dashboard
     if mode == "send":
         for row in db.due_followups(con, int(config.env("FOLLOWUP_DAYS", "7"))):

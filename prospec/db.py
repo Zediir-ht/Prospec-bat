@@ -42,7 +42,7 @@ def connect(path=None):
     if not con.execute("SELECT 1 FROM settings WHERE key='sourced_v2'").fetchone():
         con.execute("DELETE FROM sourced")
         con.execute("INSERT INTO settings(key, value) VALUES('sourced_v2', '1')")
-    # historique des envois (quota du jour, montée en charge) reconstitué depuis les mails déjà envoyés
+    # historique des envois reconstitué depuis les mails déjà envoyés
     if not con.execute("SELECT 1 FROM send_log LIMIT 1").fetchone():
         con.execute("INSERT INTO send_log SELECT contacted_at, siren, 'first' FROM companies WHERE contacted_at IS NOT NULL "
                     "AND status IN ('sent','followed_up','replied','refused','bounced')")
@@ -98,7 +98,7 @@ def send_mode(con):
 
 
 def log_send(con, siren, kind="first"):
-    """Enregistre un envoi réel (premier mail ou relance) : sert au quota du jour et à la montée en charge."""
+    """Enregistre un envoi réel (premier mail ou relance) : sert au compteur « envoyés aujourd'hui »."""
     con.execute("INSERT INTO send_log(ts, siren, kind) VALUES (?, ?, ?)", (now(), siren, kind))
     con.commit()
 

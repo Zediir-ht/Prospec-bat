@@ -150,8 +150,8 @@ LOGIN = """<div class="block"><h2>Appuyez sur Start</h2><form method="post"><lab
 <input type="password" name="pw" id="pw" autofocus autocomplete="current-password">
 {% if err %}<p style="color:var(--brick)">Mot de passe incorrect</p>{% endif %}<div class="row"><button class="ok">▶ Start</button></div></form></div>"""
 
-HOME = """<div class="block quest" style="--n:{{limit}}"><h2>Quête du jour</h2>
-<p><b>{{today}}</b> / {{limit}} mails envoyés aujourd'hui</p>{% if ramp %}<p class="mut" style="margin-top:8px;font-weight:600">{{ramp}}</p>{% endif %}
+HOME = """<div class="block quest" style="--n:{{limit}}"><h2>Objectif du jour</h2>
+<p><b>{{today}}</b> mail{{'s' if today > 1}} envoyé{{'s' if today > 1}} aujourd'hui · objectif {{limit}}</p>
 <div class="bar">{% for i in range(limit) %}<i class="{{'on' if i < today}}" style="animation-delay:{{i*60}}ms"></i>{% endfor %}</div></div>
 <div class="grid">
 {% for label,n in stats %}<div class="block stat"><b>{{n}}</b><span>{{label}}</span></div>{% endfor %}</div>
@@ -176,10 +176,8 @@ DRAFT = """{% if sending or send_log %}<div class="block" style="--c:var(--green
 <form method="post" action="{{url_for('stop_send')}}"><div class="row"><button class="ko">■ Arrêter l'envoi</button></div></form>
 <script>setTimeout(function(){location.reload()},8000)</script>{% endif %}</div>{% endif %}
 {% if rows and not sending %}<div class="block" style="--c:var(--green)"><h2>{{rows|length}} mails prêts</h2>
-{% if left %}<p class="mut">Envoie {{[rows|length, left]|min}} mail(s), avec vos modifications à l'écran, espacés de quelques secondes.{% if rows|length > left %} Quota du jour : {{left}} envoi(s) restant(s), les autres partiront demain.{% endif %}</p>
-<form method="post" action="{{url_for('send_all')}}" id="sendall"><div class="row"><button class="btn big ok" data-confirm="Appuyez encore pour confirmer l'envoi de {{[rows|length, left]|min}} mail(s)">✉ Tout envoyer ({{[rows|length, left]|min}})</button></div></form>
-{% else %}<p class="mut">Quota du jour atteint ({{limit}} mails envoyés aujourd'hui). Ces mails pourront partir demain.</p>{% endif %}
-{% if ramp %}<p class="mut" style="margin-top:8px">{{ramp}}</p>{% endif %}</div>{% endif %}
+<p class="mut">Envoie les {{rows|length}} mails, avec vos modifications à l'écran, espacés de quelques secondes.</p>
+<form method="post" action="{{url_for('send_all')}}" id="sendall"><div class="row"><button class="btn big ok" data-confirm="Appuyez encore pour confirmer l'envoi de {{rows|length}} mail(s)">✉ Tout envoyer ({{rows|length}})</button></div></form></div>{% endif %}
 <script>
 /* Confirmation dans la page (les fenêtres de confirmation sont parfois bloquées par le navigateur) :
    1er appui -> le bouton demande confirmation, 2e appui -> envoi. */
@@ -229,7 +227,7 @@ FOLLOW = """<div class="block" style="--c:var(--yellow)"><h2>{{rows|length}} à 
 <textarea id="fprompt" readonly hidden>{{prompt}}</textarea><p class="mut" id="fcopied" hidden>Copié. Collez-la dans Claude, puis sa réponse ci-dessous.</p>
 <form method="post" action="{{url_for('import_followups')}}"><textarea name="text" aria-label="Réponse de Claude" placeholder="Réponse de Claude (facultatif) : collez ici le tableau JSON" style="min-height:90px"></textarea>
 <div class="row"><button class="ok">⬇ Importer les relances</button></div></form>{% endif %}
-{% if ramp %}<p class="mut" style="margin-top:10px">{{ramp}}</p>{% endif %}</div>
+</div>
 <script>var cf=document.getElementById("copyf");if(cf)cf.addEventListener("click",function(){var t=document.getElementById("fprompt");
 function done(){document.getElementById("fcopied").hidden=false}
 if(navigator.clipboard&&navigator.clipboard.writeText){navigator.clipboard.writeText(t.value).then(done,function(){t.hidden=false;t.select()})}else{t.hidden=false;t.select();document.execCommand("copy");done()}});
@@ -378,8 +376,7 @@ def index():
     con = connect()
     if tab == "drafts":
         rows = con.execute("SELECT * FROM companies WHERE status='drafted' ORDER BY contacted_at").fetchall()
-        body = render_template_string(DRAFT, rows=rows, sig=mailer.signature, sending=_send["running"], send_log=_send["log"],
-                                      left=max(0, cli.daily_quota(con) - sent_today(con)), limit=cli.daily_quota(con), ramp=cli.ramp_text(con))
+        body = render_template_string(DRAFT, rows=rows, sig=mailer.signature, sending=_send["running"], send_log=_send["log"])
     elif tab == "write":
         batch = cli.next_to_write(con)[: int(config.env("DAILY_LIMIT", "10"))]
         body = render_template_string(
@@ -392,7 +389,7 @@ def index():
             c["f_subject"], c["f_body"] = (r["followup_subject"], r["followup_body"]) if r["followup_body"] else mailer.followup_mail(c)
             rows.append(c)
         body = render_template_string(
-            FOLLOW, rows=rows, sig=mailer.signature, days=config.env("FOLLOWUP_DAYS", "7"), ramp=cli.ramp_text(con),
+            FOLLOW, rows=rows, sig=mailer.signature, days=config.env("FOLLOWUP_DAYS", "7"),
             prompt=mailer.batch_followup_prompt([dict(r) for r in rows[:10]]) if rows else "")
     elif tab == "pipeline":
         body = render_template_string(PIPE, rows=pipeline_rows(con), stage_names=STAGES)
@@ -415,7 +412,7 @@ def index():
         stats = [("entreprises en base", sum(counts.values())), ("adresses en stock", len(cli.next_to_write(con))),
                  ("à valider", counts.get("drafted", 0)), ("envoyés", counts.get("sent", 0) + counts.get("followed_up", 0)),
                  ("réponses", counts.get("replied", 0)), ("refus", counts.get("refused", 0))]
-        body = render_template_string(HOME, stats=stats, modes=MODES, mode=db.send_mode(con), running=_job["running"], log=_job["log"], limit=cli.daily_quota(con), today=min(sent_today(con), cli.daily_quota(con)), ramp=cli.ramp_text(con))
+        body = render_template_string(HOME, stats=stats, modes=MODES, mode=db.send_mode(con), running=_job["running"], log=_job["log"], limit=cli.target(), today=sent_today(con))
     return page(body, tab, con)
 
 
@@ -506,10 +503,9 @@ def _run_send_all():
     sent, errors = 0, []
     try:
         con = db.connect()
-        left = max(0, cli.daily_quota(con) - sent_today(con))
-        rows = con.execute("SELECT * FROM companies WHERE status='drafted' ORDER BY contacted_at LIMIT ?", (left,)).fetchall()
+        rows = con.execute("SELECT * FROM companies WHERE status='drafted' ORDER BY contacted_at").fetchall()
         if not rows:
-            _send["log"] = "Rien à envoyer : quota du jour atteint ou aucun mail prêt."
+            _send["log"] = "Aucun mail prêt à envoyer."
             return
         for i, row in enumerate(rows):
             if _send["stop"]:

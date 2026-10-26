@@ -20,33 +20,17 @@ def add(con, siren, nom="X", status="sent", **kw):
     con.commit()
 
 
-# ---------- 2. montée en charge
-def test_ramp_up(con, monkeypatch):
-    monkeypatch.setenv("RAMP_UP", "1")
-    monkeypatch.setenv("DAILY_LIMIT", "10")
-    assert cli.daily_quota(con) == 3 and "3 mails par jour" in cli.ramp_text(con)
-    for days, expected in ((0, 3), (1, 3), (2, 4), (6, 6), (13, 9), (14, 10), (40, 10)):
-        con.execute("DELETE FROM send_log")
-        con.execute("INSERT INTO send_log VALUES (?, '1', 'first')", ((date.today() - timedelta(days=days)).isoformat() + "T09:00:00",))
-        assert cli.daily_quota(con) == expected, days
-    assert cli.ramp_text(con) == ""  # quota plein : plus de message
-    monkeypatch.setenv("RAMP_UP", "0")
-    con.execute("DELETE FROM send_log")
-    assert cli.daily_quota(con) == 10
-
-
-def test_quota_blocks_send_and_counts_followups(con, monkeypatch):
-    monkeypatch.setenv("DAILY_LIMIT", "2")
+# ---------- pas de quota d'envoi
+def test_no_send_quota(con, monkeypatch):
+    monkeypatch.setenv("DAILY_LIMIT", "2")  # simple objectif / taille de lot : ne bloque rien
     sent = []
     monkeypatch.setattr(mailer, "send", sent.append)
-    for i in (1, 2, 3):
+    for i in range(1, 6):
         add(con, str(i), status="drafted")
-    rows = {r["siren"]: r for r in con.execute("SELECT * FROM companies").fetchall()}
-    cli.send_now(con, rows["1"], "S", "B")
-    cli.send_now(con, rows["2"], "S", "B")
-    with pytest.raises(ValueError, match="Quota du jour atteint"):
-        cli.send_now(con, rows["3"], "S", "B")
-    assert len(sent) == 2 and db.sent_today(con) == 2
+    for r in con.execute("SELECT * FROM companies").fetchall():
+        cli.send_now(con, r, "S", "B")
+    assert len(sent) == 5 and db.sent_today(con) == 5
+    assert not hasattr(cli, "daily_quota") and not hasattr(cli, "ramp_text")
 
 
 def test_send_log_backfilled_from_history(tmp_path):
@@ -242,20 +226,29 @@ def test_followup_tab_and_actions(con, client, monkeypatch):
     assert "je reviens vers vous au sujet" in client.get("/?tab=followups").data.decode()
 
 
-def test_stats_and_quota_pages(con, client, monkeypatch):
-    monkeypatch.setenv("RAMP_UP", "1")
-    add(con, "1", status="replied", metier="plomberie", commune="Rodez", site_status="none",
-        contacted_at=date.today().isoformat() + "T09:00:00")  # premier envoi aujourd'hui : on est encore en montée en charge
+def test_stats_and_home_pages(con, client):
+    add(con, "1", status="replied", metier="plomberie", commune="Rodez", site_status="none")
     page = client.get("/?tab=stats").data.decode()
     assert "Taux de réponse" in page and "Pas de site" in page and "plomberie" in page
-    assert "Montée en charge" in client.get("/").data.decode()
+    home = client.get("/").data.decode()
+    assert "Objectif du jour" in home and "Montée en charge" not in home and "Quota" not in home
 
 
-def test_single_send_shows_reason_when_quota_reached(con, client, monkeypatch):
-    monkeypatch.setenv("DAILY_LIMIT", "1")
+def test_single_send_shows_reason_when_blocked(con, client, monkeypatch):
     monkeypatch.setattr(mailer, "send", lambda m: None)
     add(con, "1", status="drafted", body="x")
-    add(con, "2", status="drafted", body="x")
-    client.post("/draft/1", data={"act": "send", "subject": "S", "body": "B"})
-    r = client.post("/draft/2", data={"act": "send", "subject": "S", "body": "B"}, follow_redirects=True)
-    assert "Quota du jour atteint" in r.data.decode()
+    client.post("/stop", data={"email": "c1@x1.fr"})
+    con.execute("UPDATE companies SET status='drafted' WHERE siren='1'")
+    con.commit()
+    r = client.post("/draft/1", data={"act": "send", "subject": "S", "body": "B"}, follow_redirects=True)
+    assert "Envoi impossible" in r.data.decode() and "désinscrite" in r.data.decode()
+
+
+def test_empty_mail_is_refused(con, monkeypatch):
+    monkeypatch.setattr(mailer, "send", lambda m: pytest.fail("ne doit pas partir"))
+    add(con, "1", status="drafted")
+    row = con.execute("SELECT * FROM companies").fetchone()
+    with pytest.raises(ValueError, match="vide"):
+        cli.send_now(con, row, "", "Corps")
+    with pytest.raises(ValueError, match="vide"):
+        cli.send_followup_now(con, row, "Objet", "   ")

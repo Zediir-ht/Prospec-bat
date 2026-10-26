@@ -204,7 +204,8 @@ def next_to_write(con):
         "SELECT * FROM companies WHERE status='qualified' AND email IS NOT NULL AND email_source IN ('site','osm') "
         "ORDER BY (code_postal LIKE '12%') DESC, (site_status='none') DESC, siren"
     ).fetchall()
-    return [r for r in rows if not db.is_suppressed(con, r["email"])]
+    supp = db.suppressed_set(con)
+    return [r for r in rows if not db.in_suppressed(r["email"], supp)]
 
 
 def cmd_run(con, args):

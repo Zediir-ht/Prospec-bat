@@ -7,7 +7,8 @@ import threading
 import time
 from urllib.parse import quote_plus
 
-from flask import Flask, abort, jsonify, redirect, render_template_string, request, session, url_for
+from flask import Flask, abort, g, jsonify, redirect, render_template, request, session, url_for
+from jinja2 import DictLoader
 
 from . import cli, config, db, inbox, mailer, stats as statsmod
 
@@ -19,6 +20,11 @@ _job = {"running": False, "log": "", "stop": False}
 _send = {"running": False, "log": "", "stop": False}  # envoi groupé, indépendant des recherches
 
 from . import ui
+
+# Gabarits compilés une seule fois (l'extension .html active l'échappement automatique)
+TEMPLATES = ("PAGE", "LOGIN", "HOME", "DRAFT", "WRITE", "SENT", "FOLLOW", "PIPE", "STATS")
+app.jinja_loader = DictLoader({f"{name.lower()}.html": getattr(ui, name) for name in TEMPLATES})
+PAGE_CSS = ui.CSS.replace("{{bot}}", ui.BOT)
 
 MODES = [("review", "Review (je valide ici)"), ("draft", "Brouillons Gmail"), ("send", "Envoi direct")]
 MODE_SHORT = {"review": "Review", "draft": "Gmail", "send": "Auto"}
@@ -38,15 +44,15 @@ def page(body, tab="home", con=None):
         counts = {"write": len(cli.next_to_write(con)), "drafts": hud["drafted"], "followups": len(due_followups(con)),
                   "pipeline": len(pipeline_todo(con))}
     more_keys = [k for k, *_ in ui.MORE_TABS]
-    return render_template_string(
-        ui.PAGE, css=ui.CSS.replace("{{bot}}", ui.BOT), body=body, tab=tab, hud=hud, icon=ui.icon,
+    return render_template(
+        "page.html", css=PAGE_CSS, body=body, tab=tab, hud=hud, icon=ui.icon,
         main_tabs=ui.MAIN_TABS, more_tabs=ui.MORE_TABS, more_keys=more_keys, more_count=sum(counts.get(k, 0) for k in more_keys),
         mode_short=MODE_SHORT.get(mode, ""), counts=counts, msg=session.pop("msg", ""), fx=session.pop("fx", ""))
 
 
 def render(template, **kw):
     """Gabarit d'onglet, avec les icônes et la signature à disposition."""
-    return render_template_string(template, icon=ui.icon, sig=mailer.signature, **kw)
+    return render_template(template, icon=ui.icon, sig=mailer.signature, **kw)
 
 
 def sent_today(con):
@@ -93,7 +99,28 @@ def frdate(value):
 
 
 def connect():
-    return db.connect()
+    """Une seule connexion par requête, refermée à la fin."""
+    if "con" not in g:
+        g.con = db.connect()
+    return g.con
+
+
+@app.teardown_appcontext
+def close_connection(exc):
+    con = g.pop("con", None)
+    if con is not None:
+        con.close()
+
+
+PAGE_SIZE = 30
+
+
+def shown():
+    """Nombre d'éléments affichés dans une liste (« Afficher plus » ajoute PAGE_SIZE)."""
+    try:
+        return max(PAGE_SIZE, min(int(request.args.get("n", PAGE_SIZE)), 2000))
+    except ValueError:
+        return PAGE_SIZE
 
 
 @app.before_request
@@ -113,7 +140,7 @@ def login():
             session.permanent, session["ok"] = True, True
             return redirect(url_for("index"))
         err = True
-    return page(render_template_string(ui.LOGIN, err=err))
+    return page(render_template("login.html", err=err))
 
 
 @app.route("/health")
@@ -134,24 +161,27 @@ def index():
     tab = request.args.get("tab", "home")
     con = connect()
     if tab == "drafts":
-        rows = con.execute("SELECT * FROM companies WHERE status='drafted' ORDER BY contacted_at").fetchall()
-        body = render(ui.DRAFT, rows=rows, sending=_send["running"], send_log=_send["log"])
+        total = con.execute("SELECT COUNT(*) FROM companies WHERE status='drafted'").fetchone()[0]
+        rows = con.execute("SELECT * FROM companies WHERE status='drafted' ORDER BY contacted_at LIMIT ?", (shown(),)).fetchall()
+        body = render("draft.html", rows=rows, total=total, n=shown(), sending=_send["running"], send_log=_send["log"])
     elif tab == "write":
         batch = cli.next_to_write(con)[: int(config.env("DAILY_LIMIT", "10"))]
         body = render(
-            ui.WRITE, auto=bool(config.env("ANTHROPIC_API_KEY")), n=len(cli.next_to_write(con)), batch=batch,
+            "write.html", auto=bool(config.env("ANTHROPIC_API_KEY")), n=len(cli.next_to_write(con)), batch=batch,
             prompt=mailer.batch_prompt([dict(r) for r in batch]) if batch else "")
     elif tab == "followups":
+        due = due_followups(con)
         rows = []
-        for r in due_followups(con):
+        for r in due[:shown()]:
             c = dict(r)
             c["f_subject"], c["f_body"] = (r["followup_subject"], r["followup_body"]) if r["followup_body"] else mailer.followup_mail(c)
             rows.append(c)
         body = render(
-            ui.FOLLOW, rows=rows, days=config.env("FOLLOWUP_DAYS", "7"),
+            "follow.html", rows=rows, total=len(due), n=shown(), days=config.env("FOLLOWUP_DAYS", "7"),
             prompt=mailer.batch_followup_prompt([dict(r) for r in rows[:10]]) if rows else "")
     elif tab == "pipeline":
-        body = render(ui.PIPE, rows=pipeline_rows(con), stage_names=STAGES, steps=ui.STEPS, steps_keys=[k for k, _ in ui.STEPS])
+        prows = pipeline_rows(con)
+        body = render("pipe.html", rows=prows[:shown()], total=len(prows), n=shown(), stage_names=STAGES, steps=ui.STEPS, steps_keys=[k for k, _ in ui.STEPS])
     elif tab == "stats":
         data = statsmod.compute(con)
         t = data["total"]
@@ -163,22 +193,28 @@ def index():
             solid = [l for l in lines if l["sent"] >= 5]
             if solid and title != "Origine de l'adresse":
                 insights.append((title, max(solid, key=lambda l: (l["rate"], l["sent"]))))
-        body = render(ui.STATS, data=data, tiles=tiles, insights=insights)
+        body = render("stats.html", data=data, tiles=tiles, insights=insights)
     elif tab == "sent":
+        where = ("status IN ('sent','followed_up','replied','bounced') OR (status='refused' AND contacted_at IS NOT NULL)")
+        total = con.execute(f"SELECT COUNT(*) FROM companies WHERE {where}").fetchone()[0]
         rows = con.execute(
-            "SELECT * FROM companies WHERE status IN ('sent','followed_up','replied','bounced') "
-            "OR (status='refused' AND contacted_at IS NOT NULL) "
-            "ORDER BY (status='replied' AND reply_at IS NOT NULL) DESC, COALESCE(reply_at, contacted_at) DESC LIMIT 150").fetchall()
-        body = render(ui.SENT, rows=rows)
+            f"SELECT * FROM companies WHERE {where} "
+            "ORDER BY (status='replied' AND reply_at IS NOT NULL) DESC, COALESCE(reply_at, contacted_at) DESC LIMIT ?", (shown(),)).fetchall()
+        body = render("sent.html", rows=rows, total=total, n=shown())
     else:
         tab = "home"
         counts = {r["status"]: r["n"] for r in con.execute("SELECT status, COUNT(*) n FROM companies GROUP BY status")}
         stats = [("entreprises", sum(counts.values()), "--blue"), ("adresses en stock", len(cli.next_to_write(con)), "--green"),
                  ("à valider", counts.get("drafted", 0), "--yellow2"), ("envoyés", counts.get("sent", 0) + counts.get("followed_up", 0), "--blue"),
                  ("réponses", counts.get("replied", 0), "--green"), ("refus", counts.get("refused", 0), "--red")]
-        body = render(ui.HOME, stats=stats, modes=MODES, mode=db.send_mode(con), running=_job["running"], log=_job["log"],
+        body = render("home.html", stats=stats, modes=MODES, mode=db.send_mode(con), running=_job["running"], log=_job["log"],
                       limit=cli.target(), today=sent_today(con))
     return page(body, tab, con)
+
+
+@app.get("/status")
+def status():
+    return jsonify(job={"running": _job["running"], "log": _job["log"]}, send={"running": _send["running"], "log": _send["log"]})
 
 
 @app.post("/mode")

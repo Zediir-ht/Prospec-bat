@@ -40,6 +40,7 @@ def test_send_log_backfilled_from_history(tmp_path):
     c.execute("DELETE FROM send_log")
     c.commit()
     c.close()
+    db._migrated.discard(str(path))
     assert db.first_send_date(db.connect(path)) == date(2026, 10, 1)
 
 

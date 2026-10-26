@@ -26,10 +26,11 @@ CREATE TABLE IF NOT EXISTS suppression (email TEXT PRIMARY KEY, added_at TEXT DE
 """
 
 
-def connect(path=None):
-    DATA_DIR.mkdir(exist_ok=True)
-    con = sqlite3.connect(path or DB_PATH)
-    con.row_factory = sqlite3.Row
+_migrated = set()  # bases déjà mises à jour par ce processus
+
+
+def migrate(con):
+    """Crée et met à jour la structure de la base. Une seule fois par processus et par fichier."""
     con.executescript(SCHEMA)
     for col in ("nature_juridique", "email_source", "enseigne", "message_ids", "reply_at", "reply_snippet",
                 "followup_subject", "followup_body", "stage", "notes", "reminder"):  # colonnes ajoutées après la 1re version
@@ -37,6 +38,11 @@ def connect(path=None):
             con.execute(f"ALTER TABLE companies ADD COLUMN {col} TEXT")
         except sqlite3.OperationalError:
             pass
+    con.executescript("""
+        CREATE INDEX IF NOT EXISTS idx_companies_status ON companies(status);
+        CREATE INDEX IF NOT EXISTS idx_companies_email ON companies(lower(email));
+        CREATE INDEX IF NOT EXISTS idx_send_log_ts ON send_log(ts);
+    """)
     con.execute("UPDATE companies SET status='no_email' WHERE status='to_call'")
     # les entreprises téléchargées avant l'ajout de l'enseigne seront retéléchargées peu à peu pour la compléter
     if not con.execute("SELECT 1 FROM settings WHERE key='sourced_v2'").fetchone():
@@ -49,7 +55,33 @@ def connect(path=None):
     # avant l'ajout de email_source, toute adresse venait d'une lecture du site de l'entreprise
     con.execute("UPDATE companies SET email_source='site' WHERE email IS NOT NULL AND email_source IS NULL")
     con.commit()
+
+
+def connect(path=None):
+    """Connexion à la base. Mode WAL : une recherche qui écrit en arrière-plan ne bloque plus l'affichage des pages."""
+    DATA_DIR.mkdir(exist_ok=True)
+    path = str(path or DB_PATH)
+    con = sqlite3.connect(path, timeout=15, check_same_thread=False)
+    con.row_factory = sqlite3.Row
+    con.execute("PRAGMA synchronous=NORMAL")
+    if path not in _migrated or path == ":memory:":
+        if path != ":memory:":
+            con.execute("PRAGMA journal_mode=WAL")
+        migrate(con)
+        _migrated.add(path)
     return con
+
+
+def suppressed_set(con):
+    return {r[0] for r in con.execute("SELECT email FROM suppression")}
+
+
+def in_suppressed(email, supp):
+    """Même règle que is_suppressed, sur une liste déjà chargée (évite une requête par adresse)."""
+    if not email:
+        return False
+    email = email.lower()
+    return email in supp or "@" + email.split("@")[-1] in supp
 
 
 def now():

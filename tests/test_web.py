@@ -11,8 +11,8 @@ def client(tmp_path, monkeypatch):
     monkeypatch.setenv("CRON_TOKEN", "tok")
     web.app.config["TESTING"] = True
     con = db.connect(tmp_path / "t.db")
-    con.execute("INSERT INTO companies(siren,nom,commune,metier,email,status,site_status,subject,body,contacted_at) "
-                "VALUES('1','DUPONT','Rodez','plomberie','a@dupont.fr','drafted','none','Un site ?','Bonjour','2026-01-01')")
+    con.execute("INSERT INTO companies(siren,nom,commune,metier,email,email_source,status,site_status,subject,body,contacted_at) "
+                "VALUES('1','DUPONT','Rodez','plomberie','a@dupont.fr','site','drafted','none','Un site ?','Bonjour','2026-01-01')")
     con.commit()
     return web.app.test_client()
 
@@ -63,8 +63,8 @@ def test_cron_token(client, monkeypatch):
 
 def test_write_tab_and_import(client):
     con = db.connect()
-    con.execute("INSERT INTO companies(siren,nom,commune,code_postal,metier,email,status,site_status) "
-                "VALUES('2','MARTIN','Millau','12100','boulangerie','m@martin-pain.fr','qualified','none')")
+    con.execute("INSERT INTO companies(siren,nom,commune,code_postal,metier,email,email_source,status,site_status) "
+                "VALUES('2','MARTIN','Millau','12100','boulangerie','m@martin-pain.fr','site','qualified','none')")
     con.commit()
     login(client)
     page = client.get("/?tab=write").data
@@ -121,3 +121,27 @@ def test_inbox_button(client, monkeypatch):
     login(client)
     client.post("/inbox")
     assert "2 réponse(s), 1 désinscription(s)" in client.get("/?tab=sent").data.decode()
+
+
+def test_status_endpoint_and_pagination(client):
+    login(client)
+    assert client.get("/status").json == {"job": {"running": False, "log": ""}, "send": {"running": False, "log": web._send["log"]}}
+    con = db.connect()
+    for i in range(40):
+        con.execute("INSERT INTO companies(siren,nom,email,email_source,status,subject,body,contacted_at) VALUES(?,?,?,?,?,?,?,?)",
+                    (f"9{i}", f"N{i}", f"a{i}@b{i}.fr", "site", "drafted", "S", "B", "2026-01-02"))
+    con.commit()
+    page = client.get("/?tab=drafts").data.decode()
+    assert "41 mails prêts" in page and "Tout envoyer (41)" in page
+    assert page.count('class="swipe"') == 30 and "Afficher 11 de plus" in page
+    assert client.get("/?tab=drafts&n=60").data.decode().count('class="swipe"') == 41
+    assert client.get("/?tab=drafts&n=abc").status_code == 200
+
+
+def test_company_names_are_escaped(client):
+    con = db.connect()
+    con.execute("UPDATE companies SET nom='<script>alert(1)</script>', subject='<b>x</b>' WHERE siren='1'")
+    con.commit()
+    login(client)
+    page = client.get("/?tab=drafts").data.decode()
+    assert "<script>alert(1)</script>" not in page and "&lt;script&gt;alert(1)&lt;/script&gt;" in page

@@ -55,20 +55,20 @@ body{margin:0;min-height:100vh;color:var(--ink);font:16px/1.5 var(--body);-webki
 padding:0 max(16px,env(safe-area-inset-right,0px)) calc(var(--tabh) + 24px + env(safe-area-inset-bottom,0px)) max(16px,env(safe-area-inset-left,0px))}
 body.guest{padding-bottom:24px}
 .wrap{max-width:560px;margin:0 auto;position:relative;z-index:1}
-.cloud{position:fixed;z-index:0;top:110px;width:90px;height:30px;border-radius:30px;background:#fff;pointer-events:none;box-shadow:0 0 0 3px #d6e6ff;animation:drift 70s linear infinite}
+.cloud{position:fixed;z-index:0;top:110px;left:0;width:90px;height:30px;border-radius:30px;background:#fff;pointer-events:none;box-shadow:0 0 0 3px #d6e6ff;animation:drift 70s linear infinite;will-change:transform}
 .cloud::before,.cloud::after{content:"";position:absolute;background:#fff;border-radius:50%;box-shadow:0 -3px 0 0 #d6e6ff}
 .cloud::before{width:40px;height:40px;left:12px;top:-20px}.cloud::after{width:30px;height:30px;left:44px;top:-14px}
-.cloud.c2{top:52%;animation-duration:95s;animation-delay:-40s;transform:scale(.8)}
-@keyframes drift{from{left:-120px}to{left:110%}}
+.cloud.c2{top:52%;animation-duration:95s;animation-delay:-40s}
+@keyframes drift{from{transform:translateX(-130px)}to{transform:translateX(110vw)}}
 
 /* En-tête collant, qui se réduit au défilement */
 .top{position:sticky;top:0;z-index:20;margin:0 calc(-1 * max(16px,env(safe-area-inset-left,0px)));padding:calc(10px + env(safe-area-inset-top,0px)) max(16px,env(safe-area-inset-right,0px)) 10px max(16px,env(safe-area-inset-left,0px));
-background:rgba(255,255,255,.88);-webkit-backdrop-filter:blur(10px);backdrop-filter:blur(10px);transition:padding .2s,box-shadow .2s}
+background:rgba(255,255,255,.97);transition:padding .2s,box-shadow .2s}
 .top .in{max-width:560px;margin:0 auto;display:flex;align-items:center;justify-content:space-between;gap:10px}
 .top.mini{padding-top:calc(6px + env(safe-area-inset-top,0px));padding-bottom:6px;box-shadow:0 3px 0 #d6e2ff}
-h1{font:700 27px/1 var(--display);min-width:0;margin:0;letter-spacing:.5px;display:flex;gap:1px;flex-wrap:wrap;align-items:baseline;transition:font-size .2s}
+h1{font:700 27px/1 var(--display);min-width:0;margin:0;letter-spacing:.5px;display:flex;gap:1px;flex-wrap:wrap;align-items:baseline}
 h1 .word{display:flex;gap:1px;flex-wrap:nowrap;white-space:nowrap}
-h1 .word>span{display:inline-block;-webkit-text-stroke:2px var(--line);paint-order:stroke fill;text-shadow:0 3px 0 var(--line);animation:wave 3.2s ease-in-out infinite}
+h1 .word>span{display:inline-block;-webkit-text-stroke:2px var(--line);paint-order:stroke fill;text-shadow:0 3px 0 var(--line);animation:wave 3.2s ease-in-out 2}
 h1 .l0{color:var(--red)}h1 .l1{color:var(--blue)}h1 .l2{color:var(--yellow)}h1 .l3{color:var(--green)}h1 .sp{width:8px}
 @keyframes wave{0%,85%,100%{transform:translateY(0)}92%{transform:translateY(-5px)}}
 h1 small{display:block;width:100%;font:700 11px/1 var(--display);color:var(--blue);letter-spacing:3px;margin-top:7px;-webkit-text-stroke:0;text-shadow:none;animation:none}
@@ -159,6 +159,7 @@ details>summary{list-style:none;cursor:pointer}details>summary::-webkit-details-
 .card .prev{color:var(--mut);font-size:14.5px;line-height:1.45;display:-webkit-box;-webkit-line-clamp:2;-webkit-box-orient:vertical;overflow:hidden}
 .card[open] .prev,.card[open] .subj{display:none}
 .card form{margin-top:12px}
+.more{text-align:center;margin:-4px 0 18px}
 .hint{font:700 13px/1.35 var(--display);color:var(--mut);text-align:center;margin:-6px 0 14px}
 
 /* Suivi : frise des étapes */
@@ -262,7 +263,21 @@ PAGE = r"""<!doctype html><html lang="fr"><head><meta charset="utf-8">
 <script>
 (function(){
 /* En-tête compact au défilement */
-var top=document.getElementById("top");function onScroll(){top.classList.toggle("mini",window.scrollY>40)}window.addEventListener("scroll",onScroll,{passive:true});onScroll();
+var top=document.getElementById("top"),mini=null,tick=false;
+function onScroll(){if(tick)return;tick=true;requestAnimationFrame(function(){tick=false;var m=window.scrollY>40;if(m!==mini){mini=m;top.classList.toggle("mini",m)}})}
+window.addEventListener("scroll",onScroll,{passive:true});onScroll();
+/* Après une action (formulaire), on revient au même endroit, avec la même carte ouverte */
+function tabOf(q){return new URLSearchParams(q).get("tab")||"home"}
+document.addEventListener("submit",function(e){try{var d=e.target.closest("[id^=c]");
+sessionStorage.setItem("pb-pos",JSON.stringify({u:tabOf(location.search),y:window.scrollY,open:d&&d.tagName==="DETAILS"&&d.open?d.id:null}))}catch(x){}},true);
+try{var pos=JSON.parse(sessionStorage.getItem("pb-pos")||"null");sessionStorage.removeItem("pb-pos");
+if(pos&&pos.u===tabOf(location.search)){if(pos.open){var od=document.getElementById(pos.open);if(od)od.open=true}window.scrollTo(0,pos.y)}}catch(x){}
+/* Progression d'une recherche ou d'un envoi : mise à jour sans recharger la page */
+var live=document.querySelector("[data-live]");
+if(live){var kind=live.getAttribute("data-live"),logEl=live.querySelector("[data-log]");
+var poll=setInterval(function(){fetch("/status",{cache:"no-store"}).then(function(r){return r.json()}).then(function(s){var st=s[kind];
+if(logEl&&st.log){logEl.hidden=false;logEl.textContent=st.log}
+if(!st.running){clearInterval(poll);try{sessionStorage.setItem("pb-pos",JSON.stringify({u:tabOf(location.search),y:window.scrollY}))}catch(x){}location.reload()}}).catch(function(){})},3000)}
 /* Notification qui disparaît seule */
 var t=document.getElementById("toast");if(t){setTimeout(function(){t.classList.add("out");setTimeout(function(){t.remove()},400)},4500);t.addEventListener("click",function(){t.remove()})}
 /* Panneau « Plus » */
@@ -310,12 +325,11 @@ LOGIN = r"""<div class="block" style="margin-top:12px"><h2>Appuyez sur Start</h2
 <input type="password" name="pw" id="pw" autofocus autocomplete="current-password" style="margin-top:6px">
 {% if err %}<p style="color:var(--red2);font-weight:700;margin-top:8px">Mot de passe incorrect</p>{% endif %}<div class="row"><button class="ok">▶ Start</button></div></form></div>"""
 
-HOME = r"""<div class="block hero" style="--c:var(--red)"><h2>Mails du jour</h2>
+HOME = r"""<div class="block hero" style="--c:var(--red)"{% if running %} data-live="job"{% endif %}><h2>Mails du jour</h2>
 <form method="post" action="{{url_for('run_now')}}"><button class="big" {{'disabled' if running}}>{{'⏳ En cours…' if running else '▶ Préparer les mails du jour'}}</button></form>
 {% if running %}<div class="runner" aria-hidden="true"><i class="bot"></i></div>
-<form method="post" action="{{url_for('stop_job')}}"><div class="row"><button class="ko small">■ Arrêter</button></div></form>
-<script>setTimeout(function(){location.reload()},15000)</script>{% endif %}
-{% if log %}<p class="log">{{log}}</p>{% endif %}</div>
+<form method="post" action="{{url_for('stop_job')}}"><div class="row"><button class="ko small">■ Arrêter</button></div></form>{% endif %}
+<p class="log" data-log{% if not log %} hidden{% endif %}>{{log}}</p></div>
 <div class="stripe">{% for label,n,c in stats %}<div class="mini-stat" style="--c:var({{c}})"><b>{{n}}</b><span>{{label}}</span></div>{% endfor %}</div>
 <div class="block quest" style="--n:{{limit}};--c:var(--yellow)"><h2>Objectif du jour</h2>
 <p><b>{{today}}</b> mail{{'s' if today > 1}} envoyé{{'s' if today > 1}} aujourd'hui · objectif {{limit}}</p>
@@ -335,16 +349,15 @@ SITE = "{{ {'none':'pas de site','outdated':'site à refaire'}.get(c.site_status
 SIGNATURE = r"""<details class="block fold"><summary>Signature ajoutée à chaque mail {{icon('chevron')|safe}}</summary>
 <pre class="sig">{{sig('site')}}</pre><p class="mut" style="margin-top:8px">La phrase sur l'origine de l'adresse s'adapte à chaque mail (site de l'entreprise ou OpenStreetMap).</p></details>"""
 
-DRAFT = r"""{% if sending or send_log %}<div class="block" style="--c:var(--green)"><h2>Envoi groupé</h2>
-<p class="log" style="margin:0">{{send_log}}</p>{% if sending %}<div class="runner" aria-hidden="true"><i class="bot"></i></div>
-<form method="post" action="{{url_for('stop_send')}}"><div class="row"><button class="ko small">■ Arrêter l'envoi</button></div></form>
-<script>setTimeout(function(){location.reload()},8000)</script>{% endif %}</div>{% endif %}
-{% if rows and not sending %}<div class="block" style="--c:var(--green)"><h2>{{rows|length}} mails prêts</h2>
-<p class="mut">Envoie les {{rows|length}} mails, avec vos modifications à l'écran, espacés de quelques secondes.</p>
-<form method="post" action="{{url_for('send_all')}}" id="sendall"><div class="row"><button class="big ok" data-confirm="Appuyez encore pour confirmer l'envoi de {{rows|length}} mail(s)">✉ Tout envoyer ({{rows|length}})</button></div></form></div>
+DRAFT = r"""{% if sending or send_log %}<div class="block" style="--c:var(--green)"{% if sending %} data-live="send"{% endif %}><h2>Envoi groupé</h2>
+<p class="log" style="margin:0" data-log>{{send_log}}</p>{% if sending %}<div class="runner" aria-hidden="true"><i class="bot"></i></div>
+<form method="post" action="{{url_for('stop_send')}}"><div class="row"><button class="ko small">■ Arrêter l'envoi</button></div></form>{% endif %}</div>{% endif %}
+{% if rows and not sending %}<div class="block" style="--c:var(--green)"><h2>{{total}} mails prêts</h2>
+<p class="mut">Envoie les {{total}} mails, avec vos modifications à l'écran, espacés de quelques secondes.</p>
+<form method="post" action="{{url_for('send_all')}}" id="sendall"><div class="row"><button class="big ok" data-confirm="Appuyez encore pour confirmer l'envoi de {{total}} mail(s)">✉ Tout envoyer ({{total}})</button></div></form></div>
 <p class="hint">Touchez un mail pour le modifier. Glissez-le vers la droite pour l'envoyer, vers la gauche pour l'ignorer.</p>""" + SIGNATURE + r"""{% endif %}
 {% for c in rows %}<div class="swipe"><div class="swipe-bg" aria-hidden="true"><span class="go">✉ Envoyer</span><span class="no">Ignorer ✕</span></div>
-<details class="block card"><summary><div class="head"><h2>{{c.enseigne or c.nom}}</h2>{{icon('chevron')|safe}}</div>
+<details class="block card" id="c{{c.siren}}"><summary><div class="head"><h2>{{c.enseigne or c.nom}}</h2>{{icon('chevron')|safe}}</div>
 <span class="tag">{{c.commune}}</span><span class="tag">{{c.metier}}</span><span class="tag {{'hot' if c.site_status=='none' else 'warm'}}">""" + SITE + r"""</span>
 <p class="subj">{{c.subject}}</p><p class="prev">{{c.body}}</p></summary>
 <form method="post" action="{{url_for('draft_action',siren=c.siren)}}" data-siren="{{c.siren}}">
@@ -353,7 +366,8 @@ DRAFT = r"""{% if sending or send_log %}<div class="block" style="--c:var(--gree
 <div class="actions"><button name="act" value="send" class="ok grow" data-confirm="Confirmer l'envoi à {{c.email}}">✉ Envoyer</button>
 <button name="act" value="save" class="gh ib" aria-label="Enregistrer" title="Enregistrer">{{icon('save')|safe}}</button>
 <button name="act" value="skip" class="ko ib" aria-label="Ignorer" title="Ignorer">{{icon('skip')|safe}}</button></div></form></details></div>
-{% else %}<div class="block idle"><i class="bot"></i><span class="mut">Aucun mail en attente. Passez par « Rédiger », ou lancez « Préparer les mails du jour » depuis l'accueil.</span></div>{% endfor %}"""
+{% else %}<div class="block idle"><i class="bot"></i><span class="mut">Aucun mail en attente. Passez par « Rédiger », ou lancez « Préparer les mails du jour » depuis l'accueil.</span></div>{% endfor %}
+{% if total > rows|length %}<div class="more"><a class="btn gh small" href="{{url_for('index', tab="drafts", n=n + 30)}}">Afficher {{[30, total - rows|length]|min}} de plus <span class="mut" style="font-size:13px">({{total - rows|length}} restant{{'s' if total - rows|length > 1}})</span></a></div>{% endif %}"""
 
 WRITE = r"""{% if auto %}<div class="block"><h2>Rédaction automatique</h2><p class="mut">Claude écrit chaque mail via la clé API quand vous appuyez sur « Préparer les mails du jour ».</p></div>
 {% else %}<div class="block"><h2>{{n}} entreprises prêtes</h2>
@@ -373,9 +387,10 @@ SENT = r"""<form class="block" style="--c:var(--blue)" method="post" action="{{u
 {% if c.reply_snippet %}<p class="quote">« {{c.reply_snippet}} »</p>{% endif %}
 {% if c.status in ('sent','followed_up') %}<form method="post" action="{{url_for('mark',siren=c.siren)}}"><div class="row">
 <button name="s" value="replied" class="ok small">★ A répondu</button><button name="s" value="refused" class="ko small">Refus</button></div></form>{% endif %}</div>
-{% else %}<div class="block idle"><i class="bot"></i><span class="mut">Rien d'envoyé pour l'instant.</span></div>{% endfor %}"""
+{% else %}<div class="block idle"><i class="bot"></i><span class="mut">Rien d'envoyé pour l'instant.</span></div>{% endfor %}
+{% if total > rows|length %}<div class="more"><a class="btn gh small" href="{{url_for('index', tab="sent", n=n + 30)}}">Afficher {{[30, total - rows|length]|min}} de plus <span class="mut" style="font-size:13px">({{total - rows|length}} restant{{'s' if total - rows|length > 1}})</span></a></div>{% endif %}"""
 
-FOLLOW = r"""<div class="block" style="--c:var(--yellow)"><h2>{{rows|length}} à relancer</h2>
+FOLLOW = r"""<div class="block" style="--c:var(--yellow)"><h2>{{total}} à relancer</h2>
 <p class="mut">Sans réponse depuis {{days}} jours. Une seule relance par entreprise, dans le même fil que votre premier mail.</p></div>
 {% if rows %}<details class="block fold"><summary>Faire écrire les relances par Claude {{icon('chevron')|safe}}</summary>
 <button class="small" type="button" data-copy="#fprompt" data-done="#fcopied">⧉ Copier la demande</button>
@@ -384,7 +399,7 @@ FOLLOW = r"""<div class="block" style="--c:var(--yellow)"><h2>{{rows|length}} à
 <div class="row"><button class="ok small">⬇ Importer les relances</button></div></form></details>
 <p class="hint">Touchez une relance pour la modifier. Glissez vers la droite pour l'envoyer, vers la gauche pour ne pas relancer.</p>""" + SIGNATURE + r"""{% endif %}
 {% for c in rows %}<div class="swipe"><div class="swipe-bg" aria-hidden="true"><span class="go">✉ Relancer</span><span class="no">Pas de relance ✕</span></div>
-<details class="block card"><summary><div class="head"><h2>{{c.enseigne or c.nom}}</h2>{{icon('chevron')|safe}}</div>
+<details class="block card" id="c{{c.siren}}"><summary><div class="head"><h2>{{c.enseigne or c.nom}}</h2>{{icon('chevron')|safe}}</div>
 <span class="tag">{{c.commune}}</span><span class="tag warm">premier mail le {{c.contacted_at|frdate}}</span>
 <p class="subj">{{c.f_subject}}</p><p class="prev">{{c.f_body}}</p></summary>
 <form method="post" action="{{url_for('followup_action',siren=c.siren)}}"><div class="mut">{{c.email}}</div>
@@ -392,14 +407,15 @@ FOLLOW = r"""<div class="block" style="--c:var(--yellow)"><h2>{{rows|length}} à
 <div class="actions"><button name="act" value="send" class="ok grow" data-confirm="Confirmer la relance à {{c.email}}">✉ Relancer</button>
 <button name="act" value="save" class="gh ib" aria-label="Enregistrer" title="Enregistrer">{{icon('save')|safe}}</button>
 <button name="act" value="skip" class="ko ib" aria-label="Ne pas relancer" title="Ne pas relancer">{{icon('skip')|safe}}</button></div></form></details></div>
-{% else %}<div class="block idle"><i class="bot"></i><span class="mut">Aucune relance à faire. Les mails sans réponse après {{days}} jours apparaîtront ici.</span></div>{% endfor %}"""
+{% else %}<div class="block idle"><i class="bot"></i><span class="mut">Aucune relance à faire. Les mails sans réponse après {{days}} jours apparaîtront ici.</span></div>{% endfor %}
+{% if total > rows|length %}<div class="more"><a class="btn gh small" href="{{url_for('index', tab="followups", n=n + 30)}}">Afficher {{[30, total - rows|length]|min}} de plus <span class="mut" style="font-size:13px">({{total - rows|length}} restant{{'s' if total - rows|length > 1}})</span></a></div>{% endif %}"""
 
 STEPS = [("replied", "Réponse"), ("mockup", "Maquette"), ("meeting", "Rendez-vous"), ("client", "Client")]
 
 PIPE = r"""<div class="block" style="--c:var(--green)"><h2>Suivi des prospects</h2>
 <p class="mut">Touchez une étape pour faire avancer un prospect. Notes et rappels sont dans chaque carte.</p></div>
 {% for c in rows %}{% set cur = steps_keys.index(c.stage_key) if c.stage_key in steps_keys else -1 %}
-<div class="block{{' lost' if c.stage_key=='lost'}}" style="--c:var({{ {'client':'--green','lost':'--red','meeting':'--yellow','mockup':'--blue'}.get(c.stage_key,'--red') }})">
+<div class="block{{' lost' if c.stage_key=='lost'}}" id="c{{c.siren}}" style="--c:var({{ {'client':'--green','lost':'--red','meeting':'--yellow','mockup':'--blue'}.get(c.stage_key,'--red') }})">
 <h2>{{c.enseigne or c.nom}}</h2><span class="tag {{ {'client':'good','lost':'hot','meeting':'warm'}.get(c.stage_key,'') }}">{{stage_names[c.stage_key]}}</span>
 <span class="tag">{{c.commune}}</span>{% if c.due %}<span class="tag hot">Rappel : {{c.reminder|frshort}}</span>{% elif c.reminder %}<span class="tag warm">Rappel le {{c.reminder|frshort}}</span>{% endif %}
 <div class="mut" style="margin-top:6px"><a href="mailto:{{c.email}}">{{c.email}}</a></div>
@@ -412,7 +428,8 @@ PIPE = r"""<div class="block" style="--c:var(--green)"><h2>Suivi des prospects</
 <label class="mut" for="r{{c.siren}}" style="display:block;margin-top:10px">Me le rappeler le :</label>
 <div class="actions" style="margin-top:4px"><input type="date" id="r{{c.siren}}" name="reminder" value="{{c.reminder or ''}}" class="grow">
 <button name="stage" value="keep" class="gh ib" aria-label="Enregistrer" title="Enregistrer">{{icon('save')|safe}}</button></div></details></form></div>
-{% else %}<div class="block idle"><i class="bot"></i><span class="mut">Personne à suivre pour l'instant. Les réponses apparaissent ici dès que quelqu'un répond.</span></div>{% endfor %}"""
+{% else %}<div class="block idle"><i class="bot"></i><span class="mut">Personne à suivre pour l'instant. Les réponses apparaissent ici dès que quelqu'un répond.</span></div>{% endfor %}
+{% if total > rows|length %}<div class="more"><a class="btn gh small" href="{{url_for('index', tab="pipeline", n=n + 30)}}">Afficher {{[30, total - rows|length]|min}} de plus <span class="mut" style="font-size:13px">({{total - rows|length}} restant{{'s' if total - rows|length > 1}})</span></a></div>{% endif %}"""
 
 STATS = r"""<div class="block best" style="--c:var(--green)"><h2>Ce qui marche le mieux</h2>
 {% if insights %}<ul>{% for title, l in insights %}<li><span><span class="k">{{title}}</span>{{l.label}}</span><span class="v">{{l.rate}} %<span class="mut" style="font-size:13px"> ({{l.replied}}/{{l.sent}})</span></span></li>{% endfor %}</ul>

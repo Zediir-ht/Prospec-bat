@@ -226,6 +226,7 @@ def test_migration_marks_old_emails_as_site(tmp_path):
     con.execute("INSERT INTO companies(siren,nom,email,status) VALUES('1','A','contact@a.fr','qualified')")
     con.commit()
     con.close()
+    db._migrated.discard(str(path))  # nouveau processus : la migration est rejouée
     assert db.connect(path).execute("SELECT email_source FROM companies").fetchone()[0] == "site"
 
 

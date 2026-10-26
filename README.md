@@ -97,3 +97,12 @@ La recherche teste `WORKERS` (20) entreprises en parallèle : la lecture des sit
 
 ## Interface
 Barre d'onglets en bas (Accueil, Rédiger, Valider, Relancer, Plus → Envoyés, Suivi, Stats), en-tête compact au défilement, cartes de mail repliées (toucher pour modifier ; glisser à droite pour envoyer, à gauche pour ignorer), frise d'étapes dans le Suivi, carte « Ce qui marche le mieux » dans les Stats, notifications qui disparaissent seules, pièces à chaque envoi et confettis pour un nouveau client. Gabarits et styles : `prospec/ui.py`. Icône d'application : `prospec/static/icon-*.png`.
+
+## Démarrage automatique (Termux)
+```bash
+./install-boot.sh      # une fois : lance le dashboard à chaque démarrage du téléphone
+./server.sh start      # lancer maintenant, en arrière-plan
+./server.sh restart    # après une mise à jour (git pull)
+./server.sh status | stop | log
+```
+Nécessite l'application **Termux:Boot** (F-Droid), ouverte une fois, et la batterie « Sans restriction » pour Termux et Termux:Boot. Journal : `data/server.log`.

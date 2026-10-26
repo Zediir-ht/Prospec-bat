@@ -62,23 +62,27 @@ body.guest{padding-bottom:24px}
 @keyframes drift{from{transform:translateX(-130px)}to{transform:translateX(110vw)}}
 
 /* En-tête collant, qui se réduit au défilement */
-.top{position:sticky;top:0;z-index:20;margin:0 calc(-1 * max(16px,env(safe-area-inset-left,0px)));padding:calc(10px + env(safe-area-inset-top,0px)) max(16px,env(safe-area-inset-right,0px)) 10px max(16px,env(safe-area-inset-left,0px));
-background:rgba(255,255,255,.97);transition:padding .2s,box-shadow .2s}
+.top{position:fixed;top:0;left:0;right:0;z-index:20;margin:0;will-change:transform;padding:calc(10px + env(safe-area-inset-top,0px)) max(16px,env(safe-area-inset-right,0px)) 10px max(16px,env(safe-area-inset-left,0px));
+background:#fff;transition:transform .28s cubic-bezier(.2,.8,.2,1),box-shadow .28s}
+.wrap{padding-top:var(--toph,96px)}
+.top .in,.top h1,.top .hud,.top h1 small,.chip .t{transition:transform .28s cubic-bezier(.2,.8,.2,1),opacity .2s}
 .top .in{max-width:560px;margin:0 auto;display:flex;align-items:center;justify-content:space-between;gap:10px}
-.top.mini{padding-top:calc(6px + env(safe-area-inset-top,0px));padding-bottom:6px;box-shadow:0 3px 0 #d6e2ff}
+.top.mini{transform:translateY(calc(-1 * var(--shift,26px)));box-shadow:0 3px 0 #d6e2ff}
+.top.mini .in{transform:translateY(calc(var(--shift,26px) * .5))}
+.top.mini h1{transform:scale(.78);transform-origin:left center}.top.mini h1 small{opacity:0}
+.top.mini .hud{transform:scale(.8);transform-origin:right center}.top.mini .chip .t,.top.mini .chip .lbl{opacity:0}
+.chip b,.chip .lbl{transition:transform .28s cubic-bezier(.2,.8,.2,1),opacity .2s}.top.mini .chip b{transform:translateY(-8px) scale(1.15)}
 h1{font:700 27px/1 var(--display);min-width:0;margin:0;letter-spacing:.5px;display:flex;gap:1px;flex-wrap:wrap;align-items:baseline}
 h1 .word{display:flex;gap:1px;flex-wrap:nowrap;white-space:nowrap}
 h1 .word>span{display:inline-block;-webkit-text-stroke:2px var(--line);paint-order:stroke fill;text-shadow:0 3px 0 var(--line);animation:wave 3.2s ease-in-out 2}
 h1 .l0{color:var(--red)}h1 .l1{color:var(--blue)}h1 .l2{color:var(--yellow)}h1 .l3{color:var(--green)}h1 .sp{width:8px}
 @keyframes wave{0%,85%,100%{transform:translateY(0)}92%{transform:translateY(-5px)}}
 h1 small{display:block;width:100%;font:700 11px/1 var(--display);color:var(--blue);letter-spacing:3px;margin-top:7px;-webkit-text-stroke:0;text-shadow:none;animation:none}
-.top.mini h1{font-size:21px}.top.mini h1 small{display:none}.top.mini h1 .word>span{-webkit-text-stroke:1.5px var(--line);text-shadow:0 2px 0 var(--line)}
 .hud{display:flex;gap:7px;flex:none}
 .chip{display:flex;flex-direction:column;align-items:center;min-width:56px;padding:5px 9px 6px;border-radius:15px;background:#fff;box-shadow:0 0 0 2.5px var(--line),0 3px 0 2.5px var(--line);
 font:700 9.5px/1 var(--display);color:var(--mut);letter-spacing:.4px;text-transform:uppercase}
 .chip b{font:700 17px/1.15 var(--display);color:var(--ink);margin-top:2px;font-variant-numeric:tabular-nums;text-transform:none;letter-spacing:0}
 .chip.r b{color:var(--red)}.chip .lbl{display:flex;gap:4px;align-items:center}
-.top.mini .chip{flex-direction:row;gap:6px;padding:5px 9px;min-width:0}.top.mini .chip .t{display:none}.top.mini .chip b{margin:0;font-size:15px}
 .bump{animation:bump .6s cubic-bezier(.3,1.8,.5,1)}
 @keyframes bump{0%{transform:scale(1)}40%{transform:scale(1.35)}100%{transform:scale(1)}}
 .coin{display:inline-block;width:15px;height:15px;border-radius:50%;flex:none;background:radial-gradient(circle at 38% 32%,#fff6c2 0 16%,var(--yellow) 18% 58%,var(--yellow2) 60%);
@@ -263,8 +267,13 @@ PAGE = r"""<!doctype html><html lang="fr"><head><meta charset="utf-8">
 <script>
 (function(){
 /* En-tête compact au défilement */
-var top=document.getElementById("top"),mini=null,tick=false;
-function onScroll(){if(tick)return;tick=true;requestAnimationFrame(function(){tick=false;var m=window.scrollY>40;if(m!==mini){mini=m;top.classList.toggle("mini",m)}})}
+var top=document.getElementById("top"),mini=false,tick=false,root=document.documentElement;
+function measure(){var was=top.classList.contains("mini");top.classList.remove("mini");var h=top.offsetHeight;if(was)top.classList.add("mini");
+root.style.setProperty("--toph",h+"px");root.style.setProperty("--shift",Math.max(0,h-62)+"px")}
+measure();window.addEventListener("resize",measure);if(document.fonts)document.fonts.ready.then(measure);
+/* hystérésis : se réduit après 70 px, ne revient qu'en dessous de 20 px */
+function onScroll(){if(tick)return;tick=true;requestAnimationFrame(function(){tick=false;var y=window.scrollY;
+if(!mini&&y>70){mini=true;top.classList.add("mini")}else if(mini&&y<20){mini=false;top.classList.remove("mini")}})}
 window.addEventListener("scroll",onScroll,{passive:true});onScroll();
 /* Après une action (formulaire), on revient au même endroit, avec la même carte ouverte */
 function tabOf(q){return new URLSearchParams(q).get("tab")||"home"}

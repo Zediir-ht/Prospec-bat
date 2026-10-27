@@ -349,6 +349,9 @@ HOME = r"""<div class="block hero" style="--c:var(--red)"{% if running %} data-l
 <form method="post" action="{{url_for('set_mode')}}"><label class="mut" for="mode">Mode d'envoi. En mode Review, aucun mail ne part sans votre bouton Envoyer.</label>
 <select name="mode" id="mode" onchange="this.form.submit()" style="margin-top:8px">
 {% for k,l in modes %}<option value="{{k}}" {{'selected' if k==mode}}>{{l}}</option>{% endfor %}</select></form>
+<form method="post" action="{{url_for('clean_now')}}" style="margin-top:18px"><span class="mut">Adresses invalides : fichiers, adresses d'agences web, domaines inexistants, doublons.</span>
+<div class="row" style="margin-top:8px"><button class="gh small"{% if cleaning %} disabled{% endif %}>{{'⏳ Nettoyage…' if cleaning else '🧹 Nettoyer les adresses'}}</button></div>
+{% if clean_last %}<p class="mut" style="margin-top:8px;font-size:14px">Dernier nettoyage : {{clean_last[0]}} · {{clean_last[1]}} adresse(s) retirée(s)</p>{% endif %}</form>
 <form method="post" action="{{url_for('stop')}}" style="margin-top:18px"><label class="mut" for="stopmail">Désinscription : quelqu'un a répondu STOP</label>
 <input type="email" name="email" id="stopmail" placeholder="email@entreprise.fr" required style="margin-top:8px"><div class="row"><button class="ko small">Ne plus contacter</button></div></form>
 </details>"""

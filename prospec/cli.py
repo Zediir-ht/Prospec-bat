@@ -1,15 +1,22 @@
-"""Usage : python -m prospec.cli {source|osm|discover [-n N]|inbox|qualify [--all]|collect [-n N]|run|suppress EMAIL|stats}"""
+"""Usage : python -m prospec.cli {source|osm|discover [-n N]|inbox|clean|qualify [--all]|collect [-n N]|run|suppress EMAIL|stats}"""
 import argparse
 import random
 import sys
 import time
 from concurrent.futures import FIRST_COMPLETED, ThreadPoolExecutor, wait
 
-from . import config, db, discovery, dnscheck, inbox, mailer, osm, qualify, sourcing
+from . import config, db, discovery, dnscheck, emails, inbox, mailer, osm, qualify, sourcing
 
 
 def cmd_source(con, _):
     print(f"{sourcing.source(con)} nouvelles entreprises ajoutées")
+
+
+def cmd_clean(con, _):
+    removed = emails.clean_database(con)
+    for name, email, why in removed:
+        print(f"{name} : {email} retirée ({why})")
+    print(f"{len(removed)} adresse(s) invalide(s) retirée(s)")
 
 
 def cmd_osm(con, _):
@@ -44,6 +51,11 @@ def apply_result(con, row, res):
         res["email"], res["email_source"] = row["email"], row["email_source"] or "osm"
     else:
         res["email_source"] = None
+    if res["email"]:
+        ok, why = emails.check(res["email"])
+        if not ok or emails.shared_by_others(con, res["email"], row["siren"]):
+            print(f"  ! {res['email']} : {why or 'même adresse sur plusieurs entreprises'}, adresse écartée")
+            res["email"], res["email_source"] = None, None
     if res["email"] and not dnscheck.email_ok(res["email"]):
         print(f"  ! {res['email']} : le domaine ne reçoit pas de courrier, adresse écartée")
         res["email"], res["email_source"] = None, None
@@ -147,6 +159,9 @@ def check_can_send(con, row, subject, body):
         raise ValueError("l'objet ou le texte du mail est vide")
     if db.is_suppressed(con, row["email"]):
         raise ValueError(f"{row['email']} est désinscrite")
+    ok, why = emails.check(row["email"])
+    if not ok:
+        raise ValueError(f"adresse invalide ({row['email']} : {why})")
     mailer.assert_sourced(row)
     if not dnscheck.email_ok(row["email"]):
         raise ValueError(f"{row['email']} : le domaine ne reçoit pas de courrier")
@@ -269,12 +284,13 @@ def main():
     c = sub.add_parser("collect"); c.add_argument("-n", type=int, default=1000)
     d = sub.add_parser("discover"); d.add_argument("-n", type=int, default=20)
     sub.add_parser("inbox")
+    sub.add_parser("clean")
     sub.add_parser("run")
     s = sub.add_parser("suppress"); s.add_argument("email")
     sub.add_parser("stats")
     args = p.parse_args()
     con = db.connect()
-    {"source": cmd_source, "osm": cmd_osm, "collect": cmd_collect, "discover": cmd_discover, "inbox": cmd_inbox, "qualify": cmd_qualify, "run": cmd_run, "suppress": cmd_suppress,
+    {"source": cmd_source, "osm": cmd_osm, "collect": cmd_collect, "discover": cmd_discover, "inbox": cmd_inbox, "clean": cmd_clean, "qualify": cmd_qualify, "run": cmd_run, "suppress": cmd_suppress,
      "stats": cmd_stats}[args.cmd](con, args)
 
 

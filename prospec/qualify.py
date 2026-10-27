@@ -9,7 +9,7 @@ from urllib.parse import parse_qs, quote_plus, unquote, urlparse
 
 import requests
 
-from . import config
+from . import config, emails
 
 UA = {"User-Agent": "Mozilla/5.0 (compatible; prospec-bat/1.0)"}
 
@@ -116,12 +116,8 @@ def deobfuscate(text):
 
 
 def extract_emails(html):
-    found = []
-    for e in EMAIL_RE.findall(deobfuscate(html) + " " + decode_cloudflare(html)):
-        e = e.lower().rstrip(".")
-        if not any(b in e for b in BAD_EMAIL_PARTS) and e not in found:
-            found.append(e)
-    return found
+    """Adresses plausibles de la page (lues telles quelles, ou réparées, ou démasquées), sans doublon."""
+    return emails.extract(deobfuscate(html) + " " + decode_cloudflare(html))
 
 
 def analyse_html(html, url):
@@ -139,9 +135,12 @@ def analyse_html(html, url):
     return ("outdated" if issues else "ok"), issues
 
 
-def best_email(emails, domain):
-    own = [e for e in emails if domain and e.endswith(domain.replace("www.", ""))]
-    return (own or emails or [None])[0]
+def best_email(found, site_url, names=()):
+    """La meilleure adresse de l'entreprise : celle de son propre domaine d'abord, puis une messagerie grand public.
+    Les adresses d'un autre domaine (agence web, hébergeur) sont ignorées."""
+    mine = [e for e in found if emails.related(e, site_url, names)]
+    own = [e for e in mine if e.rsplit("@", 1)[-1] not in config.FREE_MAIL_DOMAINS]
+    return (own or mine or [None])[0]
 
 
 def fetch(url, session):
@@ -196,19 +195,19 @@ def qualify_company(row, session=None):
         # le site existe dans les résultats mais ne répond pas : à vérifier à la main
         return {"site_url": site, "site_status": "outdated", "site_issues": "le site ne répond pas actuellement", "email": None}
     status, issues = analyse_html(html, final_url)
-    emails = extract_emails(html)
-    domain = urlparse(final_url).netloc
+    found = extract_emails(html)
+    names = (row.get("enseigne"), row["nom"])
     for path in ("/contact", "/contact.html", "/nous-contacter", "/mentions-legales", "/mentions-legales.html", "/a-propos"):
-        if emails:
+        if best_email(found, final_url, names):
             break
         try:
             _, sub = fetch(site.rstrip("/") + path, session)
-            emails = extract_emails(sub)
+            found += [e for e in extract_emails(sub) if e not in found]
         except requests.RequestException:
             pass
     return {
         "site_url": final_url,
         "site_status": status,
         "site_issues": "; ".join(issues),
-        "email": best_email(emails, domain),
+        "email": best_email(found, final_url, names),
     }

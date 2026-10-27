@@ -106,3 +106,9 @@ Barre d'onglets en bas (Accueil, Rédiger, Valider, Relancer, Plus → Envoyés,
 ./server.sh status | stop | log
 ```
 Nécessite l'application **Termux:Boot** (F-Droid), ouverte une fois, et la batterie « Sans restriction » pour Termux et Termux:Boot. Journal : `data/server.log`.
+
+## Qualité des adresses
+Chaque adresse trouvée passe par `prospec/emails.py` : débris de code (`u003e…`), noms de fichiers (`logo@2x.png`), extensions inconnues, adresses automatiques ou factices (`noreply@`, `nom@domaine.fr`), services tiers (Wix, Sentry, hébergeurs), puis vérification du domaine (MX). Texte collé derrière l'extension (`…@site.frTel`) réparé sans rien inventer.
+Sur un site, seules comptent les adresses **de l'entreprise** : même domaine que le site, domaine proche de son nom, ou messagerie grand public (Gmail, Orange…). L'adresse d'une agence web citée en bas de page est ignorée. Une adresse présente sur 3 entreprises ou plus est écartée (agence ou groupe).
+**Réglages → Nettoyer les adresses** (ou `python -m prospec.cli clean`) revérifie toutes les adresses déjà en base ; il se lance aussi une fois automatiquement après la mise à jour. Les mails déjà envoyés ne sont pas touchés. Dernier rempart : un mail n'est jamais envoyé vers une adresse qui échoue à ces contrôles.
+Limite : on ne peut pas savoir à l'avance qu'une boîte n'existe pas sur un domaine valide. Ces cas sont détectés au retour du mail en erreur (Vérifier les réponses) et l'adresse est alors bloquée.

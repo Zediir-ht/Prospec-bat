@@ -10,7 +10,7 @@ from urllib.parse import quote_plus
 from flask import Flask, abort, g, jsonify, redirect, render_template, request, session, url_for
 from jinja2 import DictLoader
 
-from . import cli, config, db, inbox, mailer, stats as statsmod
+from . import cli, config, db, emails, inbox, mailer, stats as statsmod
 
 app = Flask(__name__)
 app.secret_key = config.env("DASHBOARD_SECRET") or config.env("DASHBOARD_PASSWORD", "change-me")
@@ -18,6 +18,7 @@ app.config.update(SESSION_COOKIE_HTTPONLY=True, SESSION_COOKIE_SAMESITE="Lax", P
 
 _job = {"running": False, "log": "", "stop": False}
 _send = {"running": False, "log": "", "stop": False}  # envoi groupé, indépendant des recherches
+_clean = {"running": False}
 
 from . import ui
 
@@ -207,7 +208,8 @@ def index():
         stats = [("entreprises", sum(counts.values()), "--blue"), ("adresses en stock", len(cli.next_to_write(con)), "--green"),
                  ("à valider", counts.get("drafted", 0), "--yellow2"), ("envoyés", counts.get("sent", 0) + counts.get("followed_up", 0), "--blue"),
                  ("réponses", counts.get("replied", 0), "--green"), ("refus", counts.get("refused", 0), "--red")]
-        body = render("home.html", stats=stats, modes=MODES, mode=db.send_mode(con), running=_job["running"], log=_job["log"],
+        last = db.get_setting(con, "last_clean").split("|")
+        body = render("home.html", clean_last=(frdate(last[0]), last[1]) if len(last) == 2 else None, cleaning=_clean["running"], stats=stats, modes=MODES, mode=db.send_mode(con), running=_job["running"], log=_job["log"],
                       limit=cli.target(), today=sent_today(con))
     return page(body, tab, con)
 
@@ -215,6 +217,34 @@ def index():
 @app.get("/status")
 def status():
     return jsonify(job={"running": _job["running"], "log": _job["log"]}, send={"running": _send["running"], "log": _send["log"]})
+
+
+def run_cleanup():
+    """Retire les adresses invalides (en arrière-plan, la vérification des domaines prend un moment)."""
+    if _clean["running"]:
+        return
+    _clean["running"] = True
+    try:
+        con = db.connect()
+        removed = emails.clean_database(con)
+        for name, email, why in removed:
+            print(f"adresse retirée : {name} <{email}> ({why})")
+        db.set_setting(con, "last_clean", f"{db.now()}|{len(removed)}")
+        db.set_setting(con, "emails_cleaned", "3")
+    except Exception as exc:
+        print(f"Nettoyage impossible : {exc}")
+    finally:
+        _clean["running"] = False
+
+
+@app.post("/clean")
+def clean_now():
+    if _clean["running"]:
+        session["msg"] = "Un nettoyage est déjà en cours."
+    else:
+        threading.Thread(target=run_cleanup, daemon=True).start()
+        session["msg"] = "Nettoyage lancé. Le résultat s'affiche dans Réglages dans quelques instants."
+    return redirect(url_for("index"))
 
 
 @app.post("/mode")
@@ -518,6 +548,13 @@ def start_inbox_poll():
     threading.Thread(target=loop, daemon=True).start()
 
 
+def start_cleanup_once():
+    """Une fois après chaque mise à jour des règles de validation : nettoie les adresses déjà en base."""
+    if db.get_setting(db.connect(), "emails_cleaned") != "3":
+        threading.Thread(target=run_cleanup, daemon=True).start()
+
+
 if __name__ == "__main__":
+    start_cleanup_once()
     start_inbox_poll()
     app.run(host="0.0.0.0", port=int(config.env("PORT", "8000")))

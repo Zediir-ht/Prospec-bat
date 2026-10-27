@@ -163,6 +163,7 @@ details>summary{list-style:none;cursor:pointer}details>summary::-webkit-details-
 .card .prev{color:var(--mut);font-size:14.5px;line-height:1.45;display:-webkit-box;-webkit-line-clamp:2;-webkit-box-orient:vertical;overflow:hidden}
 .card[open] .prev,.card[open] .subj{display:none}
 .card form{margin-top:12px}
+.lots{display:flex;flex-wrap:wrap;gap:10px;margin-top:14px}.lots .lot{flex:1 1 130px}
 .more{text-align:center;margin:-4px 0 18px}
 .hint{font:700 13px/1.35 var(--display);color:var(--mut);text-align:center;margin:-6px 0 14px}
 
@@ -382,13 +383,34 @@ DRAFT = r"""{% if sending or send_log %}<div class="block" style="--c:var(--gree
 {% if total > rows|length %}<div class="more"><a class="btn gh small" href="{{url_for('index', tab="drafts", n=n + 30)}}">Afficher {{[30, total - rows|length]|min}} de plus <span class="mut" style="font-size:13px">({{total - rows|length}} restant{{'s' if total - rows|length > 1}})</span></a></div>{% endif %}"""
 
 WRITE = r"""{% if auto %}<div class="block"><h2>Rédaction automatique</h2><p class="mut">Claude écrit chaque mail via la clé API quand vous appuyez sur « Préparer les mails du jour ».</p></div>
-{% else %}<div class="block"><h2>{{n}} entreprises prêtes</h2>
+{% else %}<div class="block"><h2>{{n}} entreprise{{'s' if n > 1}} prête{{'s' if n > 1}}</h2>
 <p class="mut">1. Copiez la demande.<br>2. Collez-la dans une conversation avec Claude (claude.ai).<br>3. Collez sa réponse ci-dessous.</p>
-{% if batch %}<div class="row"><button class="big" type="button" data-copy="#prompt" data-done="#copied">⧉ Copier la demande ({{batch|length}} entreprises)</button></div>
-<textarea id="prompt" readonly hidden>{{prompt}}</textarea><p class="mut" id="copied" hidden style="margin-top:10px">Copié. Collez-la maintenant dans Claude.</p>{% endif %}</div>
+{% if n %}<div class="row"><button class="big" type="button" id="copyall">⧉ Copier toutes les demandes ({{n}})</button></div>
+<p class="mut" id="copied" hidden style="margin-top:10px">Copié. Collez-la maintenant dans Claude.</p>
+{% if n > 40 %}<p class="mut" style="margin-top:10px">Au-delà d'environ 40 mails, Claude peut couper sa réponse en route. Dans ce cas, utilisez les lots ci-dessous.</p>{% endif %}{% endif %}</div>
+{% if n > 1 %}<details class="block fold"><summary>Copier par lots {{icon('chevron')|safe}}</summary>
+<label class="mut" for="lotsize">Taille d'un lot</label>
+<select id="lotsize" style="margin-top:6px"><option value="10">10 mails</option><option value="20">20 mails</option><option value="30" selected>30 mails</option><option value="50">50 mails</option><option value="100">100 mails</option></select>
+<div class="lots" id="lots"></div></details>{% endif %}
 <form class="block" style="--c:var(--green)" method="post" action="{{url_for('import_mails')}}"><h2>Réponse de Claude</h2>
 <textarea name="text" aria-label="Réponse de Claude" placeholder="Collez ici le tableau JSON écrit par Claude" required style="min-height:150px"></textarea>
-<div class="row"><button class="ok">⬇ Importer les mails</button></div></form>{% endif %}"""
+<p class="mut" style="margin-top:8px">Vous pouvez coller plusieurs réponses à la suite, ou en importer une par lot : les mails déjà importés ne sont pas refaits.</p>
+<div class="row"><button class="ok">⬇ Importer les mails</button></div></form>
+<script type="application/json" id="pdata">{{pdata|tojson}}</script>
+<script>
+(function(){var el=document.getElementById("pdata");if(!el)return;var d=JSON.parse(el.textContent),N=d.companies.length;
+function build(a,b){return d.intro+"\n\nEntreprises :\n"+JSON.stringify(d.companies.slice(a,b),null,1)}
+function copy(text,done){function fallback(){var t=document.createElement("textarea");t.value=text;t.setAttribute("readonly","");t.style.cssText="position:fixed;top:0;left:0;width:1px;height:1px;opacity:0";
+document.body.appendChild(t);t.select();t.setSelectionRange(0,text.length);var ok=false;try{ok=document.execCommand("copy")}catch(e){}t.remove();done(ok)}
+if(navigator.clipboard&&navigator.clipboard.writeText){navigator.clipboard.writeText(text).then(function(){done(true)},fallback)}else fallback()}
+function say(ok,msg){var c=document.getElementById("copied");if(!c)return;c.hidden=false;c.textContent=ok?msg:"Copie impossible : ouvrez Réglages Chrome > Paramètres du site, ou copiez à la main."}
+var all=document.getElementById("copyall");if(all)all.addEventListener("click",function(){copy(build(0,N),function(ok){say(ok,"Copié : les "+N+" demandes. Collez-les dans Claude.")})});
+var box=document.getElementById("lots"),size=document.getElementById("lotsize");
+function lots(){if(!box)return;var k=parseInt(size.value,10),h="";for(var a=0;a<N;a+=k){var b=Math.min(a+k,N);h+='<button type="button" class="small lot" data-a="'+a+'" data-b="'+b+'">⧉ Lot '+(a/k+1)+' <span style="opacity:.85">· '+(a+1)+(b-a>1?"–"+b:"")+'</span></button>'}box.innerHTML=h}
+if(size){size.addEventListener("change",lots);lots();box.addEventListener("click",function(e){var b=e.target.closest(".lot");if(!b)return;var a=+b.dataset.a,z=+b.dataset.b;
+copy(build(a,z),function(ok){say(ok,"Lot copié ("+(a+1)+" à "+z+"). Collez-le dans Claude.");if(ok){b.classList.add("ok");b.textContent="✓ Copié · "+(a+1)+"–"+z}})})}
+})();
+</script>{% endif %}"""
 
 SENT = r"""<form class="block" style="--c:var(--blue)" method="post" action="{{url_for('check_inbox')}}"><h2>Réponses</h2>
 <p class="mut">Lit votre boîte Gmail (sans rien modifier) : réponses, demandes STOP et adresses en erreur sont reconnues toutes seules.</p>

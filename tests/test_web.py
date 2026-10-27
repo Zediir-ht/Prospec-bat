@@ -68,7 +68,7 @@ def test_write_tab_and_import(client):
     con.commit()
     login(client)
     page = client.get("/?tab=write").data
-    assert b"MARTIN" in page and b"Copier la demande" in page
+    assert b"MARTIN" in page and b"Copier toutes les demandes (1)" in page
     reply = ('[{"siren": "2", "subject": "Un site pour Martin ?", "body": "Bonjour,\\n\\nEn cherchant boulangerie Millau, '
              'je n\'ai pas trouv\u00e9 votre site. Je peux pr\u00e9parer une maquette gratuite, sans engagement. Cela vous int\u00e9resse ?"}]')
     r = client.post("/import", data={"text": reply})
@@ -145,3 +145,37 @@ def test_company_names_are_escaped(client):
     login(client)
     page = client.get("/?tab=drafts").data.decode()
     assert "<script>alert(1)</script>" not in page and "&lt;script&gt;alert(1)&lt;/script&gt;" in page
+
+
+def test_write_has_no_limit_and_big_import(client):
+    import json
+    con = db.connect()
+    for i in range(150):
+        con.execute("INSERT INTO companies(siren,nom,commune,code_postal,metier,email,email_source,status,site_status) "
+                    "VALUES(?,?,?,?,?,?,?,?,?)", (f"5{i:03d}", f"ENTREPRISE {i}", "Rodez", "12000", "boulangerie", f"c{i}@e{i}.fr", "site", "qualified", "none"))
+    con.commit()
+    login(client)
+    page = client.get("/?tab=write").data.decode()
+    assert "150 entreprises prêtes" in page and "Copier toutes les demandes (150)" in page and "Au-delà d'environ 40" in page
+    data = json.loads(page.split('id="pdata">')[1].split("</script>")[0].replace("\\u003c", "<").replace("\\u003e", ">").replace("\\u0026", "&").replace("\\u0027", "'"))
+    assert len(data["companies"]) == 150 and "exactement un élément par entreprise" in data["intro"]
+    reply = json.dumps([{"siren": f"5{i:03d}", "subject": f"Un site pour E{i} ?",
+                         "body": "Bonjour,\n\nEn cherchant boulangerie Rodez, je n'ai pas trouvé votre site. Je peux préparer une maquette gratuite, sans engagement. Cela vous intéresse ?" + " Merci." * 600}
+                        for i in range(150)], ensure_ascii=False)
+    assert len(reply) > 500_000                                   # au-dessus de l'ancienne limite de formulaire
+    assert client.post("/import", data={"text": reply}).status_code == 302
+    assert con.execute("SELECT COUNT(*) FROM companies WHERE status='drafted' AND siren LIKE '5%'").fetchone()[0] == 150
+    assert "0 entreprise" in client.get("/?tab=write").data.decode()
+
+
+def test_followup_prompt_contains_all_due_not_just_page(client):
+    con = db.connect()
+    for i in range(45):
+        con.execute("INSERT INTO companies(siren,nom,email,email_source,status,contacted_at,message_ids,subject,body) VALUES(?,?,?,?,?,?,?,?,?)",
+                    (f"7{i:03d}", f"R{i}", f"r{i}@x{i}.fr", "site", "sent", "2026-01-01T09:00:00", f"<m{i}@g>", "Un site ?", "Bonjour, ma proposition."))
+    con.commit()
+    login(client)
+    page = client.get("/?tab=followups").data.decode()
+    assert page.count('class="swipe"') == 30                      # affichage par pages
+    prompt = page.split('id="fprompt" readonly hidden>')[1].split("</textarea>")[0]
+    assert all(f"R{i}" in prompt for i in range(45))               # mais la demande à Claude contient toutes les relances

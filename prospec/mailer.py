@@ -118,17 +118,25 @@ def compose(c):
         return None
 
 
+BATCH_INTRO = (
+    SYSTEM
+    + "\n\nTu reçois ci-dessous une liste d'entreprises. Rédige un mail DIFFÉRENT et personnalisé pour chacune."
+    + " Réponds uniquement avec un tableau JSON, sans aucun autre texte, de la forme :"
+    + ' [{"siren": "...", "subject": "objet", "body": "corps du mail"}]'
+    + "\nDans le JSON, l'objet est dans \"subject\" (pas de ligne séparée) et les retours à la ligne du corps s'écrivent \\n."
+    + "\nIl doit y avoir exactement un élément par entreprise, dans le même ordre, sans en oublier."
+)
+
+
 def batch_prompt(companies):
     """Demande à coller dans Claude (claude.ai) pour rédiger plusieurs mails d'un coup."""
     data = json.dumps([describe(c) for c in companies], ensure_ascii=False, indent=1)
-    return (
-        SYSTEM
-        + "\n\nTu reçois ci-dessous une liste d'entreprises. Rédige un mail DIFFÉRENT et personnalisé pour chacune."
-        + " Réponds uniquement avec un tableau JSON, sans aucun autre texte, de la forme :"
-        + ' [{"siren": "...", "subject": "objet", "body": "corps du mail"}]'
-        + "\nDans le JSON, l'objet est dans \"subject\" (pas de ligne séparée) et les retours à la ligne du corps s'écrivent \\n."
-        + "\n\nEntreprises :\n" + data
-    )
+    return BATCH_INTRO + "\n\nEntreprises :\n" + data
+
+
+def prompt_parts(companies):
+    """(consigne, entreprises) : le dashboard assemble lui-même la demande de chaque lot, sans la répéter dans la page."""
+    return BATCH_INTRO, [describe(c) for c in companies]
 
 
 def parse_batch(text, allowed, min_len=80):

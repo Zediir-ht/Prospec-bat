@@ -14,7 +14,7 @@ from . import cli, config, db, emails, inbox, mailer, stats as statsmod
 
 app = Flask(__name__)
 app.secret_key = config.env("DASHBOARD_SECRET") or config.env("DASHBOARD_PASSWORD", "change-me")
-app.config.update(SESSION_COOKIE_HTTPONLY=True, SESSION_COOKIE_SAMESITE="Lax", PERMANENT_SESSION_LIFETIME=60 * 60 * 24 * 30)
+app.config.update(MAX_FORM_MEMORY_SIZE=50_000_000, MAX_CONTENT_LENGTH=None, SESSION_COOKIE_HTTPONLY=True, SESSION_COOKIE_SAMESITE="Lax", PERMANENT_SESSION_LIFETIME=60 * 60 * 24 * 30)
 
 _job = {"running": False, "log": "", "stop": False}
 _send = {"running": False, "log": "", "stop": False}  # envoi groupé, indépendant des recherches
@@ -166,20 +166,18 @@ def index():
         rows = con.execute("SELECT * FROM companies WHERE status='drafted' ORDER BY contacted_at LIMIT ?", (shown(),)).fetchall()
         body = render("draft.html", rows=rows, total=total, n=shown(), sending=_send["running"], send_log=_send["log"])
     elif tab == "write":
-        batch = cli.next_to_write(con)[: int(config.env("DAILY_LIMIT", "10"))]
-        body = render(
-            "write.html", auto=bool(config.env("ANTHROPIC_API_KEY")), n=len(cli.next_to_write(con)), batch=batch,
-            prompt=mailer.batch_prompt([dict(r) for r in batch]) if batch else "")
+        ready = cli.next_to_write(con)
+        intro, items = mailer.prompt_parts([dict(r) for r in ready])
+        body = render("write.html", auto=bool(config.env("ANTHROPIC_API_KEY")), n=len(ready), pdata={"intro": intro, "companies": items})
     elif tab == "followups":
         due = due_followups(con)
-        rows = []
-        for r in due[:shown()]:
-            c = dict(r)
-            c["f_subject"], c["f_body"] = (r["followup_subject"], r["followup_body"]) if r["followup_body"] else mailer.followup_mail(c)
-            rows.append(c)
+        all_rows = [dict(r) for r in due]  # la demande à Claude contient toutes les relances, pas seulement celles affichées
+        for c in all_rows:
+            c["f_subject"], c["f_body"] = (c["followup_subject"], c["followup_body"]) if c["followup_body"] else mailer.followup_mail(c)
+        rows = all_rows[:shown()]
         body = render(
             "follow.html", rows=rows, total=len(due), n=shown(), days=config.env("FOLLOWUP_DAYS", "7"),
-            prompt=mailer.batch_followup_prompt([dict(r) for r in rows[:10]]) if rows else "")
+            prompt=mailer.batch_followup_prompt([dict(r, f_subject=r["f_subject"]) for r in all_rows]) if all_rows else "")
     elif tab == "pipeline":
         prows = pipeline_rows(con)
         body = render("pipe.html", rows=prows[:shown()], total=len(prows), n=shown(), stage_names=STAGES, steps=ui.STEPS, steps_keys=[k for k, _ in ui.STEPS])

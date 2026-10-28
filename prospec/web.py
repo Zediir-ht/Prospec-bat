@@ -23,7 +23,7 @@ _clean = {"running": False}
 from . import ui
 
 # Gabarits compilés une seule fois (l'extension .html active l'échappement automatique)
-TEMPLATES = ("PAGE", "LOGIN", "HOME", "DRAFT", "WRITE", "SENT", "FOLLOW", "PIPE", "STATS", "LIST")
+TEMPLATES = ("PAGE", "LOGIN", "HOME", "DRAFT", "WRITE", "SENT", "FOLLOW", "PIPE", "STATS", "LIST", "SOCIAL")
 app.jinja_loader = DictLoader({f"{name.lower()}.html": getattr(ui, name) for name in TEMPLATES})
 PAGE_CSS = ui.CSS.replace("{{bot}}", ui.BOT)
 
@@ -52,13 +52,17 @@ def collect_progress(con):
             "next_refresh": sourcing.next_refresh(con)}
 
 
+SOCIAL_TODO = "status='no_email' AND facebook IS NOT NULL AND fb_done IS NULL"
+
+
 def page(body, tab="home", con=None):
     mode = db.send_mode(con) if con else ""
     hud = hud_counts(con) if con else None
     counts = {}
     if con:
         counts = {"write": len(cli.next_to_write(con)), "drafts": hud["drafted"], "followups": len(due_followups(con)),
-                  "pipeline": len(pipeline_todo(con))}
+                  "pipeline": len(pipeline_todo(con)),
+                  "social": con.execute(f"SELECT COUNT(*) FROM companies WHERE {SOCIAL_TODO}").fetchone()[0]}
     more_keys = [k for k, *_ in ui.MORE_TABS]
     return render_template(
         "page.html", css=PAGE_CSS, body=body, tab=tab, hud=hud, icon=ui.icon,
@@ -211,6 +215,13 @@ def index():
             if solid and title != "Origine de l'adresse":
                 insights.append((title, max(solid, key=lambda l: (l["rate"], l["sent"]))))
         body = render("stats.html", data=data, tiles=tiles, insights=insights)
+    elif tab == "social":
+        total = con.execute(f"SELECT COUNT(*) FROM companies WHERE {SOCIAL_TODO}").fetchone()[0]
+        rows = [dict(r, message=mailer.facebook_message(dict(r)), messenger=mailer.messenger_link(r["facebook"]))
+                for r in con.execute(f"SELECT * FROM companies WHERE {SOCIAL_TODO} "
+                                     "ORDER BY (code_postal LIKE '12%') DESC, siren LIMIT ?", (shown(),)).fetchall()]
+        sent = con.execute("SELECT * FROM companies WHERE fb_done='sent' ORDER BY fb_sent_at DESC LIMIT 100").fetchall()
+        body = render("social.html", rows=rows, total=total, n=shown(), sent=sent)
     elif tab in LISTS:
         title, color, empty = LISTS[tab]
         if tab == "stock":
@@ -461,6 +472,28 @@ def mark(siren):
         con.execute("UPDATE companies SET status=? WHERE siren=?", (s, siren))
         con.commit()
     return redirect(url_for("index", tab="sent"))
+
+
+@app.post("/social/<siren>")
+def social_action(siren):
+    """Suivi des messages Facebook envoyés à la main."""
+    s, con = request.form.get("s"), connect()
+    if s == "sent":
+        con.execute("UPDATE companies SET fb_done='sent', fb_sent_at=?, fb_message=? WHERE siren=?",
+                    (db.now(), request.form.get("message", ""), siren))
+        session["msg"] = "Message noté comme envoyé."
+    elif s == "wrong":  # ce n'était pas la page de l'entreprise
+        con.execute("UPDATE companies SET facebook=NULL WHERE siren=?", (siren,))
+    elif s == "skip":
+        con.execute("UPDATE companies SET fb_done='skip' WHERE siren=?", (siren,))
+    elif s == "replied":
+        con.execute("UPDATE companies SET status='replied', reply_at=?, reply_snippet=COALESCE(reply_snippet, 'Réponse sur Facebook') "
+                    "WHERE siren=?", (db.now(), siren))
+        session["msg"] = "Bravo ! L'entreprise passe dans le Suivi."
+    elif s == "refused":
+        con.execute("UPDATE companies SET status='refused', fb_done='refused' WHERE siren=?", (siren,))
+    con.commit()
+    return redirect(url_for("index", tab="social"))
 
 
 @app.post("/stop")

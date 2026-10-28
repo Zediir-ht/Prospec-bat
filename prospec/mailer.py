@@ -18,12 +18,15 @@ ANGLES = {
 }
 
 SYSTEM = """Tu rédiges un mail de prospection à froid, en français, pour Corentin Mayrand, créateur de sites web (zdrdev.fr), à destination d'une entreprise locale d'Aveyron ou des départements voisins (artisan, commerçant, restaurateur, bâtiment, services).
+Ton : chaleureux, jovial et humain, comme un voisin sympa qui connaît la région. Glisse UNE touche d'humour légère et bienveillante, liée au métier, à la commune ou à l'Aveyron (un clin d'œil, une image amusante, une petite autodérision), jamais moqueuse envers l'entreprise, jamais lourde ni vulgaire.
 Règles strictes :
-- 4 à 6 phrases, ton direct, courtois, vouvoiement, aucun jargon, pas de ton publicitaire.
+- 4 à 6 phrases courtes, vouvoiement, aucun jargon, pas de ton publicitaire ni de superlatifs.
 - Commence par "Bonjour" suivi du prénom du dirigeant s'il est fourni, sinon "Bonjour,".
+- Évite les formules toutes faites ("Je me permets de vous contacter", "Aujourd'hui, de nombreux clients…", "N'hésitez pas") : chaque mail doit avoir sa propre accroche et sa propre tournure.
 - Mentionne le métier et la commune, et UN constat précis fourni (sans l'exagérer ni l'inventer).
 - Bénéfice concret : être trouvé par les clients de la région qui cherchent leur activité sur internet depuis leur téléphone.
-- Propose de préparer une maquette gratuite de leur site, sans engagement, et demande si ça les intéresse.
+- Propose de préparer une maquette gratuite de leur site, sans engagement, et demande simplement si ça les intéresse.
+- L'objet est court, sympathique et donne envie d'ouvrir (pas de majuscules abusives, pas de point d'exclamation en série).
 - N'indique AUCUN prix, tarif ou montant.
 - Ne mets ni signature ni formule de désinscription : elles sont ajoutées automatiquement.
 Les informations sur l'entreprise sont fournies en JSON."""
@@ -35,9 +38,9 @@ def followup_mail(c):
     """Relance par défaut (modifiable à l'écran), dans le même fil que le premier mail."""
     salut = f"Bonjour {c['dirigeant'].split()[0]}," if c.get("dirigeant") else "Bonjour,"
     body = (
-        f"{salut}\n\nJe me permets de revenir vers vous suite à mon message de la semaine dernière. "
-        f"Ma proposition reste la même : une maquette gratuite de votre site, sans engagement.\n\n"
-        f"Si ce n'est pas le bon moment, aucun souci, il vous suffit de me le dire."
+        f"{salut}\n\nPetit retour vers vous, au cas où mon message de la semaine dernière se serait perdu entre deux factures. "
+        f"La proposition tient toujours : une maquette gratuite de votre site, sans engagement, juste pour voir ce que ça donnerait.\n\n"
+        f"Si ce n'est pas le moment, aucun souci : un simple « non merci » et je vous laisse tranquille."
     )
     first = (c.get("subject") or "").strip()
     return (f"Re : {first}" if first else f"Re : Un site pour {c['nom']} ?"), body
@@ -46,7 +49,7 @@ def followup_mail(c):
 FOLLOWUP_SYSTEM = """Tu rédiges une RELANCE courte, en français, pour Corentin Mayrand, créateur de sites web, à destination d'une entreprise
 locale qui n'a pas répondu à son premier mail (fourni ci-dessous) il y a environ une semaine.
 Règles strictes :
-- 2 à 4 phrases, vouvoiement, ton courtois et léger, jamais insistant ni culpabilisant.
+- 2 à 4 phrases, vouvoiement, ton jovial et léger avec une pointe d'humour bienveillant, jamais insistant ni culpabilisant.
 - Commence par "Bonjour" suivi du prénom du dirigeant s'il est fourni, sinon "Bonjour,".
 - Ne répète pas le premier mail : rappelle simplement la maquette gratuite et sans engagement, avec un petit élément nouveau
   (une question simple, ou l'idée qu'un site se consulte surtout sur téléphone).
@@ -68,6 +71,43 @@ def batch_followup_prompt(companies):
         + "\nLes retours à la ligne du corps s'écrivent \\n dans le JSON."
         + "\n\nEntreprises :\n" + data
     )
+
+
+def facebook_message(c):
+    """Message Facebook à envoyer à la main (copier-coller), sur le même ton que les mails. Trois tournures,
+    choisies d'après le SIREN pour varier d'une entreprise à l'autre."""
+    prenom = (c.get("dirigeant") or "").split()
+    salut = f"Bonjour {prenom[0]}," if prenom else "Bonjour,"
+    metier, commune = c.get("metier") or "votre activité", c.get("commune") or "dans le coin"
+    issues = (c.get("site_issues") or "").split(";")[0].strip()
+    if c.get("site_status") == "outdated" and issues:
+        constat = f"J'ai jeté un œil à votre site, et petit détail : {issues}."
+        lead = "les clients qui vous cherchent depuis leur téléphone méritent mieux"
+    else:
+        constat = f"En cherchant « {metier} {commune} », j'ai trouvé votre page Facebook… mais pas de site internet."
+        lead = "tout le monde ne pense pas à fouiller Facebook pour trouver un pro"
+    variants = [
+        f"{salut}\n\nCorentin, créateur de sites internet en Aveyron (zdrdev.fr). {constat} Dommage, car {lead}, "
+        f"et c'est souvent sur Google que tout se joue.\n\nJe vous propose de vous préparer une maquette "
+        f"gratuite de votre site, sans engagement : ça vous dirait d'y jeter un œil ?\n\nEt si ce n'est pas le moment, "
+        f"un simple « non merci » suffit, promis je ne reviendrai pas frapper à la porte 😊",
+        f"{salut}\n\nPetit message d'un voisin du web : je m'appelle Corentin et je crée des sites pour les pros du coin "
+        f"(zdrdev.fr). {constat} Or {lead}.\n\nJe peux vous préparer une maquette gratuite, sans engagement, "
+        f"pour voir ce que ça donnerait. Ça vous tente ?\n\nSi la réponse est non, aucun souci, je ne vous embêterai plus.",
+        f"{salut}\n\nJe suis Corentin, je fabrique des sites internet pour les entreprises de l'Aveyron et d'à côté (zdrdev.fr). "
+        f"{constat} Votre page fait déjà le travail auprès des habitués, mais {lead}.\n\nJe vous propose une maquette "
+        f"gratuite de votre site, sans engagement, juste pour le plaisir des yeux. Ça vous intéresse ?\n\nUn « non merci » me va "
+        f"très bien aussi, je ne relancerai pas.",
+    ]
+    return variants[int(re.sub(r"\D", "", c.get("siren") or "0") or 0) % len(variants)]
+
+
+def messenger_link(page):
+    """Lien qui ouvre directement la conversation Messenger avec la page, quand elle a un nom d'utilisateur."""
+    slug = (page or "").rsplit("facebook.com/", 1)[-1]
+    if not slug or "/" in slug or "?" in slug:
+        return page
+    return f"https://m.me/{slug}"
 
 
 def describe(c):

@@ -237,3 +237,20 @@ def test_collect_progress(client):
     con.executemany("INSERT INTO sourced VALUES (?, ?)", [(d, n) for d in web.config.DEPARTEMENTS for n in web.config.NAF_CODES])
     con.commit()
     assert "Toutes les entreprises ont été testées" in client.get("/").get_data(as_text=True)
+
+
+def test_social_tab(client):
+    login(client)
+    con = db.connect(db.DB_PATH)
+    con.execute("INSERT INTO companies(siren,nom,commune,metier,status,site_status,facebook,dirigeant) "
+                "VALUES('5','LULU','Rodez','restaurant','no_email','none','https://www.facebook.com/chezlulu12','Lucie Martin')")
+    con.commit()
+    html = client.get("/?tab=social").get_data(as_text=True)
+    assert "LULU" in html and "https://m.me/chezlulu12" in html and "Bonjour Lucie," in html
+    client.post("/social/5", data={"s": "sent", "message": "Bonjour"})
+    html = client.get("/?tab=social").get_data(as_text=True)
+    assert "Messages envoyés" in html and "Aucune page Facebook" in html
+    client.post("/social/5", data={"s": "replied"})
+    assert db.connect(db.DB_PATH).execute("SELECT status FROM companies WHERE siren='5'").fetchone()[0] == "replied"
+    for tab in ("pipeline", "replies", "stats", "sent"):
+        assert client.get(f"/?tab={tab}").status_code == 200

@@ -33,11 +33,19 @@ def migrate(con):
     """Crée et met à jour la structure de la base. Une seule fois par processus et par fichier."""
     con.executescript(SCHEMA)
     for col in ("nature_juridique", "email_source", "enseigne", "message_ids", "reply_at", "reply_snippet",
-                "followup_subject", "followup_body", "stage", "notes", "reminder"):  # colonnes ajoutées après la 1re version
+                "followup_subject", "followup_body", "stage", "notes", "reminder", "facebook", "fb_done", "fb_message", "fb_sent_at"):  # colonnes ajoutées après la 1re version
         try:
             con.execute(f"ALTER TABLE companies ADD COLUMN {col} TEXT")
         except sqlite3.OperationalError:
             pass
+    try:
+        con.execute("ALTER TABLE osm_places ADD COLUMN facebook TEXT")
+    except sqlite3.OperationalError:
+        pass
+    # une seule fois : les entreprises déjà testées sans email sont retestées pour trouver leur page Facebook
+    if not con.execute("SELECT 1 FROM settings WHERE key='facebook_v1'").fetchone():
+        con.execute("UPDATE companies SET status='new' WHERE status='no_email'")
+        con.execute("INSERT INTO settings(key, value) VALUES('facebook_v1', '1')")
     con.executescript("""
         CREATE INDEX IF NOT EXISTS idx_companies_status ON companies(status);
         CREATE INDEX IF NOT EXISTS idx_companies_email ON companies(lower(email));

@@ -1,6 +1,6 @@
 import pytest
 
-from prospec import config, db, mailer, qualify, sourcing
+from prospec import config, db, mailer, osm, qualify, sourcing
 
 
 def test_parse_result():
@@ -165,7 +165,8 @@ def test_osm_parse_and_match(tmp_path):
     assert osm.parse_element({"type": "node", "id": 1, "tags": {"name": "X"}}, "12") is None
 
     con = db.connect(tmp_path / "t.db")
-    con.execute("INSERT INTO osm_places VALUES (:osm_id,:dept,:name,:email,:website,:city,:postcode)", place)
+    con.execute("INSERT INTO osm_places(osm_id,dept,name,email,website,city,postcode,facebook) "
+                "VALUES (:osm_id,:dept,:name,:email,:website,:city,:postcode,:facebook)", place)
     for siren, nom, cp in (("1", "SARL CALMELS", "12100"), ("2", "CALMELS PLOMBERIE", "48000"), ("3", "BOULANGERIE DURAND", "12100")):
         con.execute("INSERT INTO companies(siren,nom,commune,code_postal,status) VALUES(?,?,?,?,'new')", (siren, nom, "Millau", cp))
     con.commit()
@@ -234,11 +235,12 @@ def test_osm_website_only_and_reuse(tmp_path, monkeypatch):
     from prospec import osm
 
     assert osm.parse_element({"type": "node", "id": 2, "tags": {"name": "Garage Bru", "website": "garage-bru.fr"}}, "12")["website"] == "https://garage-bru.fr"
-    assert osm.parse_element({"type": "node", "id": 3, "tags": {"name": "Bar X", "website": "https://facebook.com/barx"}}, "12") is None
+    bar = osm.parse_element({"type": "node", "id": 3, "tags": {"name": "Bar X", "website": "https://facebook.com/barx"}}, "12")
+    assert bar["website"] == "" and bar["facebook"] == "https://www.facebook.com/barx"  # page Facebook, pas un site
     assert '"ref:INSEE"="12"' in osm.QUERY.format(dept="12") and '["craft"]' in osm.QUERY
 
     con = db.connect(tmp_path / "t.db")
-    con.execute("INSERT INTO osm_places VALUES ('node/2','12','Garage Bru','','https://garage-bru.fr','Rodez','12000')")
+    con.execute("INSERT INTO osm_places VALUES ('node/2','12','Garage Bru','','https://garage-bru.fr','Rodez','12000','')")
     con.execute("INSERT INTO companies(siren,nom,commune,code_postal,status,site_status) VALUES('1','BRU AUTOMOBILES','Rodez','12000','no_email','none')")
     con.commit()
     assert osm.match(con) == 1
@@ -363,7 +365,7 @@ def test_osm_matches_on_enseigne(tmp_path):
     from prospec import osm
 
     con = db.connect(tmp_path / "t.db")
-    con.execute("INSERT INTO osm_places VALUES ('node/1','12','Le Fournil Ruthénois','pain@fournil-ruthenois.fr','','Rodez','12000')")
+    con.execute("INSERT INTO osm_places VALUES ('node/1','12','Le Fournil Ruthénois','pain@fournil-ruthenois.fr','','Rodez','12000','')")
     con.execute("INSERT INTO companies(siren,nom,enseigne,commune,code_postal,status) VALUES('1','SAS MARTY','Le Fournil Ruthénois','Rodez','12000','new')")
     con.commit()
     assert osm.match(con) == 1
@@ -421,3 +423,33 @@ def test_sourcing_refresh_after_full_round(tmp_path, monkeypatch):
     assert sourcing.refresh_if_due(con) is True
     assert con.execute("SELECT COUNT(*) FROM sourced").fetchone()[0] == 0
     assert sourcing.next_refresh(con) is None
+
+
+def test_facebook_page_detection():
+    assert qualify.facebook_page('<a href="https://www.facebook.com/sharer/sharer.php?u=x">p</a>'
+                                 '<a href="https://fr-fr.facebook.com/boulangerie.calmels/">fb</a>') == "https://www.facebook.com/boulangerie.calmels"
+    assert qualify.facebook_page("https://m.facebook.com/profile.php?id=1234") == "https://www.facebook.com/profile.php?id=1234"
+    assert qualify.facebook_page("https://www.facebook.com/tr?id=1&ev=PageView") is None
+    urls = ["https://www.facebook.com/autreentreprise", "https://www.facebook.com/plomberie.vabre12"]
+    assert qualify.pick_facebook("VABRE PLOMBERIE", urls) == "https://www.facebook.com/plomberie.vabre12"
+    tags = {"name": "Chez Lulu", "contact:facebook": "chezlulu12"}
+    assert osm.parse_element({"type": "node", "id": 9, "tags": tags}, "12")["facebook"] == "https://www.facebook.com/chezlulu12"
+
+
+def test_apply_result_keeps_facebook(tmp_path):
+    from prospec import cli
+    con = db.connect(tmp_path / "t.db")
+    con.execute("INSERT INTO companies(siren,nom,commune,status) VALUES('1','LULU','Rodez','new')")
+    row = con.execute("SELECT * FROM companies").fetchone()
+    cli.apply_result(con, row, {"site_url": None, "site_status": "none", "site_issues": "", "email": None,
+                                "facebook": "https://www.facebook.com/chezlulu12"})
+    r = con.execute("SELECT status, facebook FROM companies").fetchone()
+    assert (r["status"], r["facebook"]) == ("no_email", "https://www.facebook.com/chezlulu12")
+
+
+def test_facebook_message_tone():
+    c = {"siren": "123", "dirigeant": "Marie Durand", "metier": "boulangerie", "commune": "Rodez", "site_status": "none"}
+    msg = mailer.facebook_message(c)
+    assert msg.startswith("Bonjour Marie,") and "maquette gratuite" in msg and "€" not in msg and "prix" not in msg
+    assert mailer.messenger_link("https://www.facebook.com/chezlulu12") == "https://m.me/chezlulu12"
+    assert "jovial" in mailer.SYSTEM

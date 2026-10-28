@@ -70,8 +70,10 @@ def apply_result(con, row, res):
     else:
         status = "no_email"  # cible pertinente mais aucun email public trouvé : ignorée
     con.execute(
-        "UPDATE companies SET site_url=?, site_status=?, site_issues=?, email=?, email_source=?, status=? WHERE siren=?",
-        (res["site_url"], res["site_status"], res["site_issues"], res["email"], res["email_source"], status, row["siren"]),
+        "UPDATE companies SET site_url=?, site_status=?, site_issues=?, email=?, email_source=?, status=?, "
+        "facebook=COALESCE(facebook, ?) WHERE siren=?",
+        (res["site_url"], res["site_status"], res["site_issues"], res["email"], res["email_source"], status,
+         res.get("facebook"), row["siren"]),
     )
     con.commit()
     print(f"{row['nom']} ({row['commune']}) -> {res['site_status']} / {res['email']} / {status}")

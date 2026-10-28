@@ -36,6 +36,35 @@ def name_tokens(nom):
     return [w for w in words if len(w) >= 4 and w not in stop]
 
 
+FB_RE = re.compile(r"https?://(?:www\.|m\.|web\.|[a-z]{2}-[a-z]{2}\.)?(?:facebook|fb)\.com/"
+                   r"(profile\.php\?id=\d+|people/[^\"'\s<>?#]+/\d+|[A-Za-z0-9][A-Za-z0-9.\-]{2,})", re.I)
+FB_NOT_PAGES = {"sharer", "sharer.php", "share", "share.php", "plugins", "tr", "dialog", "policies", "policy.php", "login",
+                "login.php", "groups", "events", "watch", "photo.php", "photo", "photos", "hashtag", "help", "privacy",
+                "legal", "story.php", "permalink.php", "home.php", "ads", "business", "marketplace", "gaming", "pages",
+                "settings", "l.php", "search", "reel", "video.php", "profile.php"}
+
+
+def facebook_page(text):
+    """Première page Facebook citée dans le texte (lien du site, tag OSM, résultat de recherche), au format
+    https://www.facebook.com/<page>, ou None. Les liens de partage, de connexion, etc. sont ignorés."""
+    for m in FB_RE.finditer(text or ""):
+        slug = m.group(1).rstrip(".")
+        if slug.split("?")[0].lower() in FB_NOT_PAGES and not slug.startswith("profile.php?id="):
+            continue
+        return f"https://www.facebook.com/{slug}"
+    return None
+
+
+def pick_facebook(nom, urls):
+    """Page Facebook parmi les résultats de recherche, seulement si son adresse reprend le nom de l'entreprise."""
+    tokens = name_tokens(nom)
+    for u in urls:
+        page = facebook_page(u)
+        if page and any(t in norm(page.rsplit("/", 1)[-1]) for t in tokens):
+            return page
+    return None
+
+
 def pick_site(nom, urls):
     """Premier résultat hors annuaires dont le domaine ressemble au nom de l'entreprise."""
     tokens = name_tokens(nom)
@@ -169,8 +198,9 @@ def places_site(nom, commune, session):
 
 
 def qualify_company(row, session=None):
-    """row: dict avec nom, commune. Retourne dict site_url, site_status, site_issues, email."""
+    """row: dict avec nom, commune. Retourne dict site_url, site_status, site_issues, email, facebook."""
     session = session or thread_session()
+    facebook = None
     try:
         if row.get("site_url"):  # déjà connu (OpenStreetMap ou recherche précédente) : pas de recherche web
             site = row["site_url"]
@@ -182,18 +212,21 @@ def qualify_company(row, session=None):
                 if config.env("GOOGLE_PLACES_KEY"):
                     site = places_site(name, row["commune"], session)
                 else:
-                    site = pick_site(both, search_urls(name, row["commune"], session))
+                    urls = search_urls(name, row["commune"], session)
+                    site = pick_site(both, urls)
+                    facebook = facebook or pick_facebook(both, urls)
                 if site:
                     break
     except requests.RequestException:
-        return {"site_url": None, "site_status": "unknown", "site_issues": "", "email": None}
+        return {"site_url": None, "site_status": "unknown", "site_issues": "", "email": None, "facebook": None}
     if not site:
-        return {"site_url": None, "site_status": "none", "site_issues": "", "email": None}
+        return {"site_url": None, "site_status": "none", "site_issues": "", "email": None, "facebook": facebook}
     try:
         final_url, html = fetch(site, session)
     except requests.RequestException:
         # le site existe dans les résultats mais ne répond pas : à vérifier à la main
-        return {"site_url": site, "site_status": "outdated", "site_issues": "le site ne répond pas actuellement", "email": None}
+        return {"site_url": site, "site_status": "outdated", "site_issues": "le site ne répond pas actuellement", "email": None,
+                "facebook": facebook}
     status, issues = analyse_html(html, final_url)
     found = extract_emails(html)
     names = (row.get("enseigne"), row["nom"])
@@ -210,4 +243,5 @@ def qualify_company(row, session=None):
         "site_status": status,
         "site_issues": "; ".join(issues),
         "email": best_email(found, final_url, names),
+        "facebook": facebook_page(html) or facebook,  # le lien affiché sur le site de l'entreprise passe en premier
     }

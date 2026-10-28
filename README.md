@@ -115,3 +115,9 @@ Limite : on ne peut pas savoir à l'avance qu'une boîte n'existe pas sur un dom
 
 ## Rédiger sans limite
 Le bouton **Copier toutes les demandes (N)** de l'onglet Rédiger copie les N entreprises prêtes en une seule demande, sans plafond (la consigne demande à Claude un mail par entreprise, dans l'ordre). Au-delà d'environ 40 mails, Claude peut couper sa réponse : le bloc **Copier par lots** découpe en lots de 10 à 100. L'import accepte une réponse de n'importe quelle taille ou plusieurs réponses à la suite ; les mails déjà importés ne sont pas refaits. La demande de relances (onglet Relancer) contient elle aussi toutes les relances en attente.
+
+## Ton des mails
+Consigne de rédaction (`prospec/mailer.py`, `SYSTEM`) : ton chaleureux et jovial, une touche d'humour légère et bienveillante liée au métier, à la commune ou à l'Aveyron, sans formules toutes faites ; toujours vouvoiement, constat exact, maquette gratuite, aucun prix. Les relances suivent le même ton.
+
+## Facebook (onglet Plus → Réseaux)
+Pour les entreprises **sans adresse mail**, la recherche relève leur page Facebook : lien affiché sur leur site, tag `facebook` / `contact:facebook` d'OpenStreetMap, ou résultat de recherche dont l'adresse reprend le nom de l'entreprise. L'onglet Réseaux propose pour chacune un message déjà rédigé (même ton que les mails, modifiable), un bouton **Copier** et un lien **Ouvrir Messenger** : l'envoi se fait **à la main**, rien n'est automatisé (l'automatisation est interdite par Facebook et LinkedIn et fait bloquer les comptes). Boutons **Envoyé**, **Pas la bonne page**, **Ignorer**, puis **A répondu** / **Refus** dans « Messages envoyés » (une réponse passe dans le Suivi). À la mise à jour, les entreprises déjà testées sans mail sont retestées une fois pour trouver leur page.

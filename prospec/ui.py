@@ -25,6 +25,7 @@ _PATHS = {
     "pipeline": '<path d="M5 21V4h12l-2.5 4.5L17 13H5"/>',
     "stats": '<path d="M5 20v-8M11 20V5M17 20v-5"/><path d="M3 20h18"/>',
     "save": '<path d="M5 4h11.5L20 7.5V20H5z"/><path d="M8.5 4v5h7V4M8.5 20v-6h8v6"/>',
+    "social": '<path d="M4 5.5h16v10.5H10l-4.5 4v-4H4z"/><path d="M8.5 10.5h7"/>',
     "skip": '<path d="m6.5 6.5 11 11M17.5 6.5l-11 11"/>',
     "chevron": '<path d="m7 10 5 5 5-5"/>',
 }
@@ -39,6 +40,7 @@ def icon(name, size=24):
 MAIN_TABS = [("home", "Accueil", "home"), ("write", "Rédiger", "write"), ("drafts", "Valider", "send"), ("followups", "Relancer", "followup")]
 MORE_TABS = [("sent", "Envoyés", "sent", "Mails partis et réponses reçues"),
              ("pipeline", "Suivi", "pipeline", "Prospects qui ont répondu, jusqu'au client"),
+             ("social", "Réseaux", "social", "Entreprises sans mail, à contacter sur Facebook"),
              ("stats", "Stats", "stats", "Ce qui donne le plus de réponses")]
 
 CSS = r"""
@@ -493,3 +495,26 @@ LIST = r"""<div class="block" style="--c:var({{color}})"><h2>{{title}} <span cla
 {% if c.reply_snippet %}<p class="quote">« {{c.reply_snippet}} »</p>{% endif %}</div>
 {% else %}<div class="block idle"><i class="bot"></i><span class="mut">{{empty}}</span></div>{% endfor %}
 {% if total > rows|length %}<div class="more"><a class="btn gh small" href="{{url_for('index', tab=kind, n=n + 30)}}">Afficher {{[30, total - rows|length]|min}} de plus <span class="mut" style="font-size:13px">({{total - rows|length}} restant{{'s' if total - rows|length > 1}})</span></a></div>{% endif %}"""
+
+
+SOCIAL = r"""<div class="block" style="--c:var(--blue)"><h2>Facebook <span class="mut">({{total}})</span></h2>
+<p class="mut">Entreprises sans adresse mail mais avec une page Facebook. Copiez le message, ouvrez Messenger, collez et envoyez vous-même : rien ne part automatiquement, vos comptes ne risquent rien.</p></div>
+{% for c in rows %}<details class="block fold" style="--c:var(--blue)" id="fb-{{c.siren}}"><summary><span>{{c.enseigne or c.nom}} <span class="mut" style="font-size:14px">· {{c.metier}} · {{c.commune}}</span></span> {{icon('chevron')|safe}}</summary>
+<span class="tag {{'warm' if c.site_status == 'outdated' else ''}}">{{'site à revoir' if c.site_status == 'outdated' else 'sans site'}}</span>
+<form method="post" action="{{url_for('social_action', siren=c.siren)}}">
+<textarea name="message" aria-label="Message pour {{c.enseigne or c.nom}}" style="min-height:220px;margin-top:8px">{{c.message}}</textarea>
+<div class="row"><button type="button" class="small" data-copy>⧉ Copier le message</button><a class="btn small gh" href="{{c.messenger}}" target="_blank" rel="noopener">💬 Ouvrir Messenger</a></div>
+<p class="mut" style="font-size:13px;margin-top:6px">Page : <a href="{{c.facebook}}" target="_blank" rel="noopener">{{c.facebook}}</a></p>
+<div class="row"><button name="s" value="sent" class="ok small">✓ Envoyé</button><button name="s" value="wrong" class="gh small">Pas la bonne page</button><button name="s" value="skip" class="gh small">Ignorer</button></div></form></details>
+{% else %}<div class="block idle"><i class="bot"></i><span class="mut">Aucune page Facebook à contacter pour l'instant : la collecte en ajoute au fil des recherches.</span></div>{% endfor %}
+{% if total > rows|length %}<div class="more"><a class="btn gh small" href="{{url_for('index', tab="social", n=n + 30)}}">Afficher {{[30, total - rows|length]|min}} de plus <span class="mut" style="font-size:13px">({{total - rows|length}} restant{{'s' if total - rows|length > 1}})</span></a></div>{% endif %}
+{% if sent %}<details class="block fold" style="--c:var(--green)"><summary><span>Messages envoyés <span class="mut" style="font-size:14px">· {{sent|length}}</span></span> {{icon('chevron')|safe}}</summary>
+{% for c in sent %}<div style="margin-top:12px"><b>{{c.enseigne or c.nom}}</b> <span class="mut">· {{c.commune}} · le {{c.fb_sent_at|frdate}}</span>
+{% if c.status not in ('replied','refused') %}<form method="post" action="{{url_for('social_action', siren=c.siren)}}"><div class="row"><button name="s" value="replied" class="ok small">★ A répondu</button><button name="s" value="refused" class="ko small">Refus</button></div></form>
+{% else %}<span class="tag {{'good' if c.status == 'replied' else 'hot'}}">{{'a répondu' if c.status == 'replied' else 'refus'}}</span>{% endif %}</div>{% endfor %}</details>{% endif %}
+<script>
+document.addEventListener("click",function(e){var b=e.target.closest("button[data-copy]");if(!b)return;var t=b.closest("form").querySelector("textarea"),text=t.value;
+function done(ok){b.textContent=ok?"✓ Copié":"Copie impossible : sélectionnez le texte";if(ok)b.classList.add("ok")}
+function fallback(){t.select();t.setSelectionRange(0,text.length);var ok=false;try{ok=document.execCommand("copy")}catch(x){}done(ok)}
+if(navigator.clipboard&&navigator.clipboard.writeText){navigator.clipboard.writeText(text).then(function(){done(true)},fallback)}else fallback()});
+</script>"""

@@ -5,7 +5,7 @@ from datetime import datetime, timedelta
 import requests
 
 from . import config, db
-from .qualify import DIRECTORIES, EMAIL_RE, norm
+from .qualify import DIRECTORIES, EMAIL_RE, facebook_page, norm
 
 OVERPASS = "https://overpass-api.de/api/interpreter"
 UA = {"User-Agent": "prospec-bat/1.0 (prospection B2B locale)"}
@@ -16,7 +16,7 @@ BUSINESS = ['["shop"]', '["craft"]', '["office"]',
 QUERY = ("[out:json][timeout:300];\n"
          'area["boundary"="administrative"]["admin_level"="6"]["ref:INSEE"="{dept}"]->.d;\n('
          + "".join(f'nwr(area.d)["name"]["{k}"];' for k in ("email", "contact:email"))
-         + "".join(f'nwr(area.d)["name"]["{k}"]{b};' for k in ("website", "contact:website") for b in BUSINESS)
+         + "".join(f'nwr(area.d)["name"]["{k}"]{b};' for k in ("website", "contact:website", "facebook", "contact:facebook") for b in BUSINESS)
          + ");\nout tags center;")
 
 # mots trop courants pour distinguer deux entreprises
@@ -33,14 +33,18 @@ def parse_element(el, dept):
     website = (t.get("contact:website") or t.get("website") or "").split(";")[0].strip()
     if website and not website.startswith("http"):
         website = "https://" + website
+    fb = (t.get("contact:facebook") or t.get("facebook") or "").split(";")[0].strip()
+    if fb and "facebook" not in fb.lower() and "fb.com" not in fb.lower():
+        fb = "https://www.facebook.com/" + fb.lstrip("@/")  # tag réduit au nom de la page
+    facebook = facebook_page(fb) or facebook_page(website) or ""
     if any(d in website.lower() for d in DIRECTORIES):  # page Facebook, annuaire... : pas le site de l'entreprise
         website = ""
-    if not t.get("name") or not (emails or website):
+    if not t.get("name") or not (emails or website or facebook):
         return None
     return {
         "osm_id": f"{el.get('type', 'x')}/{el.get('id')}", "dept": dept, "name": t["name"],
         "email": emails[0].lower() if emails else "", "website": website,
-        "city": t.get("addr:city", ""), "postcode": t.get("addr:postcode", ""),
+        "city": t.get("addr:city", ""), "postcode": t.get("addr:postcode", ""), "facebook": facebook,
     }
 
 
@@ -55,13 +59,14 @@ def refresh(con, session=None, max_age_days=30):
     """Télécharge les lieux OSM avec email, par département (une fois par mois)."""
     n = 0
     for dept in config.DEPARTEMENTS:
-        last = db.get_setting(con, f"osm2:{dept}")
+        last = db.get_setting(con, f"osm3:{dept}")
         if last and datetime.fromisoformat(last) > datetime.now() - timedelta(days=max_age_days):
             continue
         for p in fetch_dept(dept, session):
-            con.execute("INSERT OR REPLACE INTO osm_places VALUES (:osm_id,:dept,:name,:email,:website,:city,:postcode)", p)
+            con.execute("INSERT OR REPLACE INTO osm_places(osm_id, dept, name, email, website, city, postcode, facebook) "
+                        "VALUES (:osm_id,:dept,:name,:email,:website,:city,:postcode,:facebook)", p)
             n += 1
-        db.set_setting(con, f"osm2:{dept}", datetime.now().isoformat())
+        db.set_setting(con, f"osm3:{dept}", datetime.now().isoformat())
     return n
 
 
@@ -112,14 +117,20 @@ def match(con):
             by_token.setdefault(t, []).append(p)
     n = 0
     rows = con.execute(
-        "SELECT * FROM companies WHERE status IN ('new','no_email') AND (email IS NULL OR site_url IS NULL)"
+        "SELECT * FROM companies WHERE status IN ('new','no_email') AND (email IS NULL OR site_url IS NULL OR facebook IS NULL)"
     ).fetchall()
     for c in rows:
         for t in set().union(*(distinctive(n) for n in company_names(c))):
             hit = next((p for p in by_token.get(t, []) if same_company(c, p)
-                        and ((p["email"] and not c["email"]) or (p["website"] and not c["site_url"]))), None)
+                        and ((p["email"] and not c["email"]) or (p["website"] and not c["site_url"])
+                             or (p["facebook"] and not c["facebook"]))), None)
             if not hit:
                 continue
+            if hit["facebook"] and not c["facebook"]:
+                con.execute("UPDATE companies SET facebook=? WHERE siren=?", (hit["facebook"], c["siren"]))
+            if not ((hit["email"] and not c["email"]) or (hit["website"] and not c["site_url"])):
+                n += 1
+                break  # seulement la page Facebook : rien à retester
             if hit["email"] and not c["email"]:
                 con.execute("UPDATE companies SET email=?, email_source='osm' WHERE siren=?", (hit["email"], c["siren"]))
             if hit["website"] and not c["site_url"]:

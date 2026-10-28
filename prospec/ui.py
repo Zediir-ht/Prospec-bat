@@ -132,6 +132,7 @@ button.armed{background:var(--yellow)!important;color:var(--ink)!important;box-s
 .hero{background:linear-gradient(180deg,var(--sky),#fff 75%)}
 .stripe{display:grid;grid-template-columns:repeat(3,minmax(0,1fr));gap:10px;margin:0 0 18px}
 .mini-stat{background:#fff;border-radius:18px;padding:10px 8px 9px;text-align:center;box-shadow:0 0 0 2.5px var(--line),0 4px 0 2.5px var(--line)}
+a.mini-stat{display:block;text-decoration:none;transition:transform .12s}a.mini-stat:active{transform:translateY(3px)}a.mini-stat:focus-visible{outline:3px solid var(--c);outline-offset:2px}
 .mini-stat b{display:block;font:700 22px/1.1 var(--display);color:var(--c);font-variant-numeric:tabular-nums}
 .mini-stat span{display:block;font:700 12px/1.2 var(--display);color:var(--mut);margin-top:3px}
 .quest .bar{display:grid;grid-template-columns:repeat(var(--n),1fr);gap:5px;margin-top:10px;padding:5px;border-radius:999px;background:#fff;box-shadow:inset 0 0 0 3px var(--line)}
@@ -340,7 +341,7 @@ HOME = r"""<div class="block hero" style="--c:var(--red)"{% if running %} data-l
 {% if running %}<div class="runner" aria-hidden="true"><i class="bot"></i></div>
 <form method="post" action="{{url_for('stop_job')}}"><div class="row"><button class="ko small">■ Arrêter</button></div></form>{% endif %}
 <p class="log" data-log{% if not log %} hidden{% endif %}>{{log}}</p></div>
-<div class="stripe">{% for label,n,c in stats %}<div class="mini-stat" style="--c:var({{c}})"><b>{{n}}</b><span>{{label}}</span></div>{% endfor %}</div>
+<div class="stripe">{% for label,n,c,tab in stats %}{% if tab %}<a class="mini-stat" style="--c:var({{c}})" href="{{url_for('index', tab=tab)}}"><b>{{n}}</b><span>{{label}}</span></a>{% else %}<div class="mini-stat" style="--c:var({{c}})"><b>{{n}}</b><span>{{label}}</span></div>{% endif %}{% endfor %}</div>
 <div class="block quest" style="--n:{{limit}};--c:var(--yellow)"><h2>Objectif du jour</h2>
 <p><b>{{today}}</b> mail{{'s' if today > 1}} envoyé{{'s' if today > 1}} aujourd'hui · objectif {{limit}}</p>
 <div class="bar">{% for i in range(limit) %}<i class="{{'on' if i < today}}" style="animation-delay:{{i*60}}ms"></i>{% endfor %}</div></div>
@@ -474,3 +475,13 @@ STATS = r"""<div class="block best" style="--c:var(--green)"><h2>Ce qui marche l
 {% for l in lines %}<div class="bars"><div class="l"><span>{{l.label}}{% if l.sent < 5 %} <span class="tag few">peu de données</span>{% endif %}</span>
 <span class="mut" style="white-space:nowrap">{{l.replied}}/{{l.sent}} · {{l.rate}} %</span></div><div class="t"><i style="width:{{[l.rate,3]|max}}%"></i></div></div>{% endfor %}</details>{% endfor %}
 <p class="mut" style="text-align:center">Taux de réponse = réponses / mails reçus. Les adresses en erreur ne comptent pas.</p>"""
+
+
+LIST = r"""<div class="block" style="--c:var({{color}})"><h2>{{title}} <span class="mut">({{total}})</span></h2>
+<div class="row"><a class="btn gh small" href="{{url_for('index')}}">← Accueil</a>{% if kind == 'stock' and total %}<a class="btn small" href="{{url_for('index', tab='write')}}">✎ Rédiger</a>{% endif %}</div></div>
+{% for c in rows %}<div class="block" style="--c:var({{color}})"><h2>{{c.enseigne or c.nom}}</h2>
+<span class="tag">{{c.metier or c.naf}}</span><span class="tag">{{c.commune}}</span>{% if kind == 'stock' %}<span class="tag {{'warm' if c.site_status in ('none','outdated')}}">{{ {'none':'sans site','outdated':'site ancien','ok':'site correct'}.get(c.site_status,'site ?') }}</span>{% endif %}
+<div class="mut" style="margin-top:6px">{{c.email}}{% if kind == 'stock' %} · source : {{ {'site':'site web','osm':'OpenStreetMap'}.get(c.email_source,c.email_source) }}{% elif c.reply_at %} · le {{c.reply_at|frdate}}{% elif c.contacted_at %} · envoyé le {{c.contacted_at|frdate}}{% endif %}</div>
+{% if c.reply_snippet %}<p class="quote">« {{c.reply_snippet}} »</p>{% endif %}</div>
+{% else %}<div class="block idle"><i class="bot"></i><span class="mut">{{empty}}</span></div>{% endfor %}
+{% if total > rows|length %}<div class="more"><a class="btn gh small" href="{{url_for('index', tab=kind, n=n + 30)}}">Afficher {{[30, total - rows|length]|min}} de plus <span class="mut" style="font-size:13px">({{total - rows|length}} restant{{'s' if total - rows|length > 1}})</span></a></div>{% endif %}"""

@@ -179,3 +179,26 @@ def test_followup_prompt_contains_all_due_not_just_page(client):
     assert page.count('class="swipe"') == 30                      # affichage par pages
     prompt = page.split('id="fprompt" readonly hidden>')[1].split("</textarea>")[0]
     assert all(f"R{i}" in prompt for i in range(45))               # mais la demande à Claude contient toutes les relances
+
+
+def test_home_tiles_link_to_pages(client):
+    login(client)
+    html = client.get("/").get_data(as_text=True)
+    for tab in ("stock", "drafts", "replies", "refused"):
+        assert f"tab={tab}" in html
+
+
+def test_list_pages(client):
+    login(client)
+    con = db.connect(db.DB_PATH)
+    con.execute("INSERT INTO companies(siren,nom,commune,metier,email,email_source,status,site_status) "
+                "VALUES('2','MARTIN','Millau','maçonnerie','m@martin.fr','osm','qualified','none')")
+    con.execute("INSERT INTO companies(siren,nom,commune,email,status,reply_snippet,reply_at) "
+                "VALUES('3','DURAND','Albi','d@durand.fr','replied','Intéressé','2026-02-01')")
+    con.execute("INSERT INTO companies(siren,nom,commune,email,status) VALUES('4','LEROY','Foix','l@leroy.fr','refused')")
+    con.commit()
+    stock = client.get("/?tab=stock").get_data(as_text=True)
+    assert "MARTIN" in stock and "m@martin.fr" in stock and "OpenStreetMap" in stock
+    assert "Intéressé" in client.get("/?tab=replies").get_data(as_text=True)
+    refused = client.get("/?tab=refused").get_data(as_text=True)
+    assert "LEROY" in refused and "DURAND" not in refused

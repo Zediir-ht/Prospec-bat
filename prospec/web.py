@@ -23,7 +23,7 @@ _clean = {"running": False}
 from . import ui
 
 # Gabarits compilés une seule fois (l'extension .html active l'échappement automatique)
-TEMPLATES = ("PAGE", "LOGIN", "HOME", "DRAFT", "WRITE", "SENT", "FOLLOW", "PIPE", "STATS")
+TEMPLATES = ("PAGE", "LOGIN", "HOME", "DRAFT", "WRITE", "SENT", "FOLLOW", "PIPE", "STATS", "LIST")
 app.jinja_loader = DictLoader({f"{name.lower()}.html": getattr(ui, name) for name in TEMPLATES})
 PAGE_CSS = ui.CSS.replace("{{bot}}", ui.BOT)
 
@@ -114,6 +114,9 @@ def close_connection(exc):
 
 
 PAGE_SIZE = 30
+LISTS = {"replies": ("Réponses", "--green", "Aucune réponse pour l'instant."),
+         "refused": ("Refus", "--red", "Aucun refus."),
+         "stock": ("Adresses en stock", "--green", "Aucune adresse prête : lancez le mode collecte.")}
 
 
 def shown():
@@ -193,6 +196,17 @@ def index():
             if solid and title != "Origine de l'adresse":
                 insights.append((title, max(solid, key=lambda l: (l["rate"], l["sent"]))))
         body = render("stats.html", data=data, tiles=tiles, insights=insights)
+    elif tab in LISTS:
+        title, color, empty = LISTS[tab]
+        if tab == "stock":
+            all_rows = cli.next_to_write(con)
+            total, rows = len(all_rows), all_rows[:shown()]
+        else:
+            status = "replied" if tab == "replies" else "refused"
+            total = con.execute("SELECT COUNT(*) FROM companies WHERE status=?", (status,)).fetchone()[0]
+            rows = con.execute("SELECT * FROM companies WHERE status=? ORDER BY COALESCE(reply_at, contacted_at) DESC LIMIT ?",
+                               (status, shown())).fetchall()
+        body = render("list.html", kind=tab, title=title, color=color, empty=empty, rows=rows, total=total, n=shown())
     elif tab == "sent":
         where = ("status IN ('sent','followed_up','replied','bounced') OR (status='refused' AND contacted_at IS NOT NULL)")
         total = con.execute(f"SELECT COUNT(*) FROM companies WHERE {where}").fetchone()[0]
@@ -203,9 +217,9 @@ def index():
     else:
         tab = "home"
         counts = {r["status"]: r["n"] for r in con.execute("SELECT status, COUNT(*) n FROM companies GROUP BY status")}
-        stats = [("entreprises", sum(counts.values()), "--blue"), ("adresses en stock", len(cli.next_to_write(con)), "--green"),
-                 ("à valider", counts.get("drafted", 0), "--yellow2"), ("envoyés", counts.get("sent", 0) + counts.get("followed_up", 0), "--blue"),
-                 ("réponses", counts.get("replied", 0), "--green"), ("refus", counts.get("refused", 0), "--red")]
+        stats = [("entreprises", sum(counts.values()), "--blue", None), ("adresses en stock", len(cli.next_to_write(con)), "--green", "stock"),
+                 ("à valider", counts.get("drafted", 0), "--yellow2", "drafts"), ("envoyés", counts.get("sent", 0) + counts.get("followed_up", 0), "--blue", "sent"),
+                 ("réponses", counts.get("replied", 0), "--green", "replies"), ("refus", counts.get("refused", 0), "--red", "refused")]
         last = db.get_setting(con, "last_clean").split("|")
         body = render("home.html", clean_last=(frdate(last[0]), last[1]) if len(last) == 2 else None, cleaning=_clean["running"], stats=stats, modes=MODES, mode=db.send_mode(con), running=_job["running"], log=_job["log"],
                       limit=cli.target(), today=sent_today(con))

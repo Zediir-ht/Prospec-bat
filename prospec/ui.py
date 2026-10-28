@@ -348,9 +348,9 @@ HOME = r"""<div class="block hero" style="--c:var(--red)"{% if running %} data-l
 <div class="block" style="--c:var(--green)"><h2>Mode collecte</h2><p class="mut">Cherche des adresses en continu tant que le serveur tourne, pour remplir le stock. Elle laisse passer « Préparer les mails du jour ». Laissez le téléphone branché.</p>
 <p style="margin-top:8px"><span class="tag {{'good' if auto}}">{{'● Collecte permanente activée' if auto else '○ Collecte permanente désactivée'}}</span>{% if running and kind == 'collect' %}<span class="tag warm">en cours</span>{% endif %}</p>
 {% set p = progress %}<div class="bars">
-<div class="l"><span>Entreprises récupérées (SIRENE)</span><b>{{p.cats_done}} / {{p.cats}} catégories</b></div><div class="t"><i style="width:{{p.cats_pct}}%"></i></div>
+<div class="l"><span>Entreprises récupérées (SIRENE){% if p.next_refresh %} ✓{% endif %}</span><b>{{p.cats_done}} / {{p.cats}} catégories</b></div><div class="t"><i style="width:{{p.cats_pct}}%"></i></div>
 <div class="l" style="margin-top:10px"><span>Entreprises testées</span><b>{{p.tested}} / {{p.total}}</b></div><div class="t"><i style="width:{{p.tested_pct}}%"></i></div></div>
-<p class="mut" style="margin-top:8px">{% if p.finished %}✓ Toutes les entreprises ont été testées : {{p.found}} adresse{{'s' if p.found > 1}} trouvée{{'s' if p.found > 1}} au total.
+<p class="mut" style="margin-top:8px">{% if p.finished %}✓ Toutes les entreprises ont été testées : {{p.found}} adresse{{'s' if p.found > 1}} trouvée{{'s' if p.found > 1}} au total. Nouveau passage pour les entreprises créées depuis : le {{p.next_refresh.strftime('%d/%m')}}.
 {% elif p.untested %}Encore {{p.untested}} entreprise{{'s' if p.untested > 1}} à tester{% if p.cats_done < p.cats %}, et {{p.cats - p.cats_done}} catégorie{{'s' if p.cats - p.cats_done > 1}} à récupérer{% endif %} · {{p.found}} adresse{{'s' if p.found > 1}} trouvée{{'s' if p.found > 1}}.
 {% else %}Toutes les entreprises récupérées sont testées ; reste {{p.cats - p.cats_done}} catégorie{{'s' if p.cats - p.cats_done > 1}} à récupérer · {{p.found}} adresse{{'s' if p.found > 1}} trouvée{{'s' if p.found > 1}}.{% endif %}</p>
 <div class="row"><form method="post" action="{{url_for('toggle_collect')}}"><button class="{{'gh' if auto else 'ok'}} small">{{'■ Désactiver' if auto else '★ Activer la collecte permanente'}}</button></form>

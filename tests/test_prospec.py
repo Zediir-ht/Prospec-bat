@@ -1,6 +1,6 @@
 import pytest
 
-from prospec import db, mailer, qualify, sourcing
+from prospec import config, db, mailer, qualify, sourcing
 
 
 def test_parse_result():
@@ -408,3 +408,16 @@ def test_signature_has_contact_details(monkeypatch):
     text = mailer.build_message("a@b.fr", "S", "Bonjour", "site").get_content()
     assert "https://zdrdev.fr" in text and "06 32 91 53 77" in text and "corentin.mayrand@gmail.com" in text
     assert mailer.format_phone("0632915377") == "06 32 91 53 77"
+
+
+def test_sourcing_refresh_after_full_round(tmp_path, monkeypatch):
+    from datetime import datetime, timedelta
+    con = db.connect(tmp_path / "t.db")
+    con.executemany("INSERT INTO sourced VALUES (?, ?)", [(d, n) for d in config.DEPARTEMENTS for n in config.NAF_CODES])
+    con.commit()
+    assert sourcing.refresh_if_due(con) is False  # passage tout juste fini : on note la date
+    assert sourcing.next_refresh(con) > datetime.now() + timedelta(days=6)
+    db.set_setting(con, "sourced_full_at", (datetime.now() - timedelta(days=8)).isoformat())
+    assert sourcing.refresh_if_due(con) is True
+    assert con.execute("SELECT COUNT(*) FROM sourced").fetchone()[0] == 0
+    assert sourcing.next_refresh(con) is None

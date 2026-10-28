@@ -10,7 +10,7 @@ from urllib.parse import quote_plus
 from flask import Flask, abort, g, jsonify, redirect, render_template, request, session, url_for
 from jinja2 import DictLoader
 
-from . import cli, config, db, emails, inbox, mailer, stats as statsmod
+from . import cli, config, db, emails, inbox, mailer, sourcing, stats as statsmod
 
 app = Flask(__name__)
 app.secret_key = config.env("DASHBOARD_SECRET") or config.env("DASHBOARD_PASSWORD", "change-me")
@@ -39,6 +39,7 @@ def hud_counts(con):
 
 def collect_progress(con):
     """Avancement de la collecte : catégories SIRENE (département × activité) téléchargées et entreprises testées."""
+    sourcing.refresh_if_due(con)  # nouveau passage dû : la collecte repart pour les entreprises créées depuis
     total = con.execute("SELECT COUNT(*) FROM companies").fetchone()[0]
     untested = con.execute("SELECT COUNT(*) FROM companies WHERE status='new'").fetchone()[0]
     found = con.execute("SELECT COUNT(*) FROM companies WHERE email_source IN ('site','osm')").fetchone()[0]
@@ -47,7 +48,8 @@ def collect_progress(con):
     pct = lambda a, b: round(100 * a / b) if b else 0
     return {"cats": cats, "cats_done": min(done, cats), "cats_pct": pct(done, cats), "total": total, "tested": total - untested,
             "tested_pct": pct(total - untested, total), "untested": untested, "found": found,
-            "finished": done >= cats and untested == 0}
+            "finished": done >= cats and untested == 0,
+            "next_refresh": sourcing.next_refresh(con)}
 
 
 def page(body, tab="home", con=None):

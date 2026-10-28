@@ -1,10 +1,11 @@
 """Récupère les entreprises du bâtiment de l'Aveyron via l'API officielle Recherche d'entreprises."""
 import random
 import time
+from datetime import datetime, timedelta
 
 import requests
 
-from . import config
+from . import config, db
 
 API = "https://recherche-entreprises.api.gouv.fr/search"
 ENTREPRENEUR_INDIVIDUEL = "1000"
@@ -76,9 +77,37 @@ def pool_size(con):
     return con.execute("SELECT COUNT(*) FROM companies WHERE status='new'").fetchone()[0]
 
 
+def refresh_days():
+    return int(config.env("SOURCE_REFRESH_DAYS", "7"))
+
+
+def next_refresh(con):
+    """Date du prochain passage sur toutes les catégories (pour les entreprises créées depuis), ou None
+    tant que le passage en cours n'est pas terminé. Note la date de fin du passage la première fois."""
+    if con.execute("SELECT COUNT(*) FROM sourced").fetchone()[0] < len(config.DEPARTEMENTS) * len(config.NAF_CODES):
+        return None
+    full = db.get_setting(con, "sourced_full_at")
+    if not full:
+        full = datetime.now().isoformat(timespec="seconds")
+        db.set_setting(con, "sourced_full_at", full)
+    return datetime.fromisoformat(full) + timedelta(days=refresh_days())
+
+
+def refresh_if_due(con):
+    """Toutes les SOURCE_REFRESH_DAYS jours (7 par défaut), reprend toutes les catégories : seules les
+    entreprises encore inconnues sont ajoutées. Retourne True si un nouveau passage commence."""
+    due = next_refresh(con)
+    if due is None or datetime.now() < due:
+        return False
+    con.execute("DELETE FROM sourced")
+    db.set_setting(con, "sourced_full_at", "")
+    return True
+
+
 def source(con, session=None, min_pool=300):
     """Récupère les entreprises par (département, code NAF) dans un ordre mélangé, Aveyron d'abord, et
     s'arrête dès que `min_pool` entreprises restent à tester : inutile de tout télécharger."""
+    refresh_if_due(con)
     done = {(r["dept"], r["naf"]) for r in con.execute("SELECT dept, naf FROM sourced")}
     added = 0
     for dept in config.DEPARTEMENTS:

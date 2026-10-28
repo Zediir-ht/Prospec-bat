@@ -37,6 +37,19 @@ def hud_counts(con):
             "replied": counts.get("replied", 0), "drafted": counts.get("drafted", 0)}
 
 
+def collect_progress(con):
+    """Avancement de la collecte : catégories SIRENE (département × activité) téléchargées et entreprises testées."""
+    total = con.execute("SELECT COUNT(*) FROM companies").fetchone()[0]
+    untested = con.execute("SELECT COUNT(*) FROM companies WHERE status='new'").fetchone()[0]
+    found = con.execute("SELECT COUNT(*) FROM companies WHERE email_source IN ('site','osm')").fetchone()[0]
+    cats = len(config.DEPARTEMENTS) * len(config.NAF_CODES)
+    done = con.execute("SELECT COUNT(*) FROM sourced").fetchone()[0]
+    pct = lambda a, b: round(100 * a / b) if b else 0
+    return {"cats": cats, "cats_done": min(done, cats), "cats_pct": pct(done, cats), "total": total, "tested": total - untested,
+            "tested_pct": pct(total - untested, total), "untested": untested, "found": found,
+            "finished": done >= cats and untested == 0}
+
+
 def page(body, tab="home", con=None):
     mode = db.send_mode(con) if con else ""
     hud = hud_counts(con) if con else None
@@ -221,7 +234,7 @@ def index():
                  ("à valider", counts.get("drafted", 0), "--yellow2", "drafts"), ("envoyés", counts.get("sent", 0) + counts.get("followed_up", 0), "--blue", "sent"),
                  ("réponses", counts.get("replied", 0), "--green", "replies"), ("refus", counts.get("refused", 0), "--red", "refused")]
         last = db.get_setting(con, "last_clean").split("|")
-        body = render("home.html", clean_last=(frdate(last[0]), last[1]) if len(last) == 2 else None, cleaning=_clean["running"], stats=stats, modes=MODES, mode=db.send_mode(con), running=_job["running"], kind=_job["kind"], auto=collect_auto(con), log=_job["log"],
+        body = render("home.html", clean_last=(frdate(last[0]), last[1]) if len(last) == 2 else None, cleaning=_clean["running"], stats=stats, modes=MODES, mode=db.send_mode(con), running=_job["running"], kind=_job["kind"], auto=collect_auto(con), progress=collect_progress(con), log=_job["log"],
                       limit=cli.target(), today=sent_today(con))
     return page(body, tab, con)
 
@@ -527,15 +540,16 @@ def collect_auto(con):
 
 def start_collect_loop():
     """Collecte permanente : tant que le dashboard tourne et qu'elle est activée, relance la recherche
-    d'adresses aussitôt, dès que rien d'autre ne tourne. Seule exception : 10 s après une erreur
-    (réseau coupé), pour ne pas tourner à vide."""
+    d'adresses aussitôt, dès que rien d'autre ne tourne. Exceptions : 10 s après une erreur (réseau
+    coupé), et plus rien une fois toutes les entreprises testées, pour ne pas tourner à vide."""
 
     def loop():
         time.sleep(10)
         while True:
             wait = 5  # collecte désactivée ou autre tâche en cours : on revérifie dans 5 s
             try:
-                if collect_auto(db.connect()) and not _job["running"]:
+                con = db.connect()
+                if collect_auto(con) and not _job["running"] and not collect_progress(con)["finished"]:
                     _job.update(running=True, stop=False, kind="collect")
                     wait = 0 if _run_collect() is not None else 10
             except Exception as exc:

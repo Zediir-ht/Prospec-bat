@@ -222,3 +222,18 @@ def test_collect_auto_toggle_and_daily_preempts(client, monkeypatch):
         assert web.collect_auto(db.connect(db.DB_PATH)) is False
     finally:
         web._job.update(running=False, kind="", stop=False, next=None)
+
+
+def test_collect_progress(client):
+    login(client)
+    con = db.connect(db.DB_PATH)
+    con.execute("INSERT INTO companies(siren,nom,status) VALUES('9','NOUVELLE','new')")
+    con.commit()
+    p = web.collect_progress(con)
+    assert (p["total"], p["tested"], p["untested"], p["found"], p["finished"]) == (2, 1, 1, 1, False)
+    html = client.get("/").get_data(as_text=True)
+    assert "Entreprises testées" in html and "1 / 2" in html and "Encore 1 entreprise à tester" in html
+    con.execute("UPDATE companies SET status='no_email' WHERE siren='9'")
+    con.executemany("INSERT INTO sourced VALUES (?, ?)", [(d, n) for d in web.config.DEPARTEMENTS for n in web.config.NAF_CODES])
+    con.commit()
+    assert "Toutes les entreprises ont été testées" in client.get("/").get_data(as_text=True)

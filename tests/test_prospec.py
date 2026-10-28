@@ -452,4 +452,4 @@ def test_facebook_message_tone():
     msg = mailer.facebook_message(c)
     assert msg.startswith("Bonjour Marie,") and "maquette gratuite" in msg and "€" not in msg and "prix" not in msg
     assert mailer.messenger_link("https://www.facebook.com/chezlulu12") == "https://m.me/chezlulu12"
-    assert "jovial" not in mailer.SYSTEM and "moqueur" in mailer.SYSTEM and "respectueux" in mailer.SYSTEM
+    assert "joyeux" in mailer.SYSTEM and "moqueur" in mailer.SYSTEM and "Ne jamais en inventer" in mailer.SYSTEM

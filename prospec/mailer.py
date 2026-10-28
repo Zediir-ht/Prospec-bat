@@ -18,10 +18,11 @@ ANGLES = {
 }
 
 SYSTEM = """Tu rédiges un mail de prospection à froid, en français, pour Corentin Mayrand, créateur de sites web (zdrdev.fr), à destination d'une entreprise locale d'Aveyron ou des départements voisins (artisan, commerçant, restaurateur, bâtiment, services).
-Ton : chaleureux, simple et respectueux, comme un voisin sympa qui connaît la région. Le sourire vient de la légèreté du ton et, au plus, d'UN clin d'œil bienveillant sur le métier, la commune ou l'Aveyron, ou d'une petite autodérision de Corentin.
-Interdit : plaisanter sur le site ou l'entreprise elle-même (ancienneté, défauts, absence de site), l'ironie, les sous-entendus, tout ce qui peut sembler moqueur, condescendant ou donneur de leçon. Le constat se dit simplement et gentiment, comme une observation utile, jamais comme un reproche : on reconnaît d'abord ce qui fonctionne (le travail, la réputation, la page déjà en place).
+Ton : joyeux, enthousiaste et chaleureux, comme un voisin sympa qui connaît la région et qui est content d'écrire. Le mail doit se lire avec le sourire : une ouverture positive, de l'enthousiasme visible (« ravi », « avec plaisir », « ça me ferait plaisir »), au plus UNE image amusante et gentille liée au métier, à la commune ou à l'Aveyron (par exemple un robinet capricieux, une chaudière en grève), ou une petite autodérision de Corentin.
+Compliments : un compliment sincère en ouverture quand les données le permettent (métier indispensable, belle commune, déjà un site). Ne jamais en inventer : s'il n'y a rien de vrai à dire, reste simplement aimable.
+Interdit : plaisanter sur le site ou l'entreprise elle-même (ancienneté, défauts, absence de site), l'ironie, les sous-entendus, tout ce qui peut sembler moqueur, condescendant ou donneur de leçon. Le constat se dit simplement et gentiment, comme une observation utile (« un détail qui se règle vite »), jamais comme un reproche.
 Règles strictes :
-- 4 à 6 phrases courtes, vouvoiement, aucun jargon, pas de ton publicitaire ni de superlatifs.
+- 4 à 6 phrases, vouvoiement, aucun jargon, pas de ton publicitaire ni de superlatifs ; au plus un point d'exclamation par phrase et trois dans le mail, pas d'émoticône.
 - Commence par "Bonjour" suivi du prénom du dirigeant s'il est fourni, sinon "Bonjour,".
 - Évite les formules toutes faites ("Je me permets de vous contacter", "Aujourd'hui, de nombreux clients…", "N'hésitez pas") : chaque mail doit avoir sa propre accroche et sa propre tournure.
 - Mentionne le métier et la commune, et UN constat précis fourni (sans l'exagérer ni l'inventer).
@@ -50,7 +51,7 @@ def followup_mail(c):
 FOLLOWUP_SYSTEM = """Tu rédiges une RELANCE courte, en français, pour Corentin Mayrand, créateur de sites web, à destination d'une entreprise
 locale qui n'a pas répondu à son premier mail (fourni ci-dessous) il y a environ une semaine.
 Règles strictes :
-- 2 à 4 phrases, vouvoiement, ton jovial et léger avec une pointe d'humour bienveillant, jamais insistant, culpabilisant ni moqueur.
+- 2 à 4 phrases, vouvoiement, ton souriant et léger, jamais insistant, culpabilisant ni moqueur.
 - Commence par "Bonjour" suivi du prénom du dirigeant s'il est fourni, sinon "Bonjour,".
 - Ne répète pas le premier mail : rappelle simplement la maquette gratuite et sans engagement, avec un petit élément nouveau
   (une question simple, ou l'idée qu'un site se consulte surtout sur téléphone).

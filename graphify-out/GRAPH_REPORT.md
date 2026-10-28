@@ -1,7 +1,7 @@
 # Graph Report - Prospec-bat  (2026-10-28)
 
 ## Corpus Check
-- 31 files · ~25,694 words
+- 31 files · ~25,780 words
 - Verdict: corpus is large enough that graph structure adds value.
 - Unclassified: 3 file(s) not represented in the graph (top: (none) 2, .example 1)
 
@@ -11,7 +11,7 @@
 - Token cost: 0 input · 0 output
 
 ## Graph Freshness
-- Built from commit: `156ba547`
+- Built from commit: `55bcf2fa`
 - Run `git rev-parse HEAD` and compare to check if the graph is stale.
 - Run `graphify update .` after code changes (no API cost).
 

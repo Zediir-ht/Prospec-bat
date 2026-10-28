@@ -1,7 +1,7 @@
 # Graph Report - Prospec-bat  (2026-10-28)
 
 ## Corpus Check
-- 31 files · ~25,624 words
+- 31 files · ~25,694 words
 - Verdict: corpus is large enough that graph structure adds value.
 - Unclassified: 3 file(s) not represented in the graph (top: (none) 2, .example 1)
 
@@ -11,7 +11,7 @@
 - Token cost: 0 input · 0 output
 
 ## Graph Freshness
-- Built from commit: `fabebba5`
+- Built from commit: `156ba547`
 - Run `git rev-parse HEAD` and compare to check if the graph is stale.
 - Run `graphify update .` after code changes (no API cost).
 
@@ -144,7 +144,7 @@ Cohesion: 0.40
 Nodes (5): draft_action(), Dashboard mobile (Flask), Déploiement Docker et disque persistant, Mode review : rien ne part sans validation, gunicorn (>=22)
 
 ## Knowledge Gaps
-- **8 isolated node(s):** `PATH`, `Suivi des prospects (de la réponse au client)`, `flask (>=3.0)`, `gunicorn (>=22)`, `requests (>=2.31)` (+3 more)
+- **8 isolated node(s):** `PATH`, `flask (>=3.0)`, `requests (>=2.31)`, `Suivi des prospects (de la réponse au client)`, `gunicorn (>=22)` (+3 more)
   These have ≤1 connection - possible missing edges or undocumented components. (Counts symbols only; 145 node(s) total have ≤1 connection when file, concept and rationale nodes are included.)
 - **2 thin communities (<3 nodes) omitted from report** — run `graphify query` to explore isolated nodes.
 
@@ -153,7 +153,7 @@ _Questions this graph is uniquely positioned to answer:_
 
 - **Why does `connect()` connect `Base de données et tests du dashboard` to `web.py`, `Commandes en ligne et orchestration`, `Lecture des réponses Gmail`, `Envoi et relances`, `run_cleanup`, `re`, `test_prospec.py`, `qualify.py`, `db.py`, `post`?**
   _High betweenness centrality (0.067) - this node is a cross-community bridge._
-- **What connects `PATH`, `Suivi des prospects (de la réponse au client)`, `flask (>=3.0)` to the rest of the system?**
+- **What connects `PATH`, `flask (>=3.0)`, `requests (>=2.31)` to the rest of the system?**
   _8 weakly-connected nodes found - possible documentation gaps or missing edges._
 - **Should `web.py` be split into smaller, more focused modules?**
   _Cohesion score 0.12554112554112554 - nodes in this community are weakly interconnected._

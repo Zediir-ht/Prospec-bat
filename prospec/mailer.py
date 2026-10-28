@@ -18,7 +18,8 @@ ANGLES = {
 }
 
 SYSTEM = """Tu rédiges un mail de prospection à froid, en français, pour Corentin Mayrand, créateur de sites web (zdrdev.fr), à destination d'une entreprise locale d'Aveyron ou des départements voisins (artisan, commerçant, restaurateur, bâtiment, services).
-Ton : chaleureux, jovial et humain, comme un voisin sympa qui connaît la région. Glisse UNE touche d'humour légère et bienveillante, liée au métier, à la commune ou à l'Aveyron (un clin d'œil, une image amusante, une petite autodérision), jamais moqueuse envers l'entreprise, jamais lourde ni vulgaire.
+Ton : chaleureux, simple et respectueux, comme un voisin sympa qui connaît la région. Le sourire vient de la légèreté du ton et, au plus, d'UN clin d'œil bienveillant sur le métier, la commune ou l'Aveyron, ou d'une petite autodérision de Corentin.
+Interdit : plaisanter sur le site ou l'entreprise elle-même (ancienneté, défauts, absence de site), l'ironie, les sous-entendus, tout ce qui peut sembler moqueur, condescendant ou donneur de leçon. Le constat se dit simplement et gentiment, comme une observation utile, jamais comme un reproche : on reconnaît d'abord ce qui fonctionne (le travail, la réputation, la page déjà en place).
 Règles strictes :
 - 4 à 6 phrases courtes, vouvoiement, aucun jargon, pas de ton publicitaire ni de superlatifs.
 - Commence par "Bonjour" suivi du prénom du dirigeant s'il est fourni, sinon "Bonjour,".
@@ -38,7 +39,7 @@ def followup_mail(c):
     """Relance par défaut (modifiable à l'écran), dans le même fil que le premier mail."""
     salut = f"Bonjour {c['dirigeant'].split()[0]}," if c.get("dirigeant") else "Bonjour,"
     body = (
-        f"{salut}\n\nPetit retour vers vous, au cas où mon message de la semaine dernière se serait perdu entre deux factures. "
+        f"{salut}\n\nPetit retour vers vous, au cas où mon message de la semaine dernière aurait été noyé dans le courrier. "
         f"La proposition tient toujours : une maquette gratuite de votre site, sans engagement, juste pour voir ce que ça donnerait.\n\n"
         f"Si ce n'est pas le moment, aucun souci : un simple « non merci » et je vous laisse tranquille."
     )
@@ -49,7 +50,7 @@ def followup_mail(c):
 FOLLOWUP_SYSTEM = """Tu rédiges une RELANCE courte, en français, pour Corentin Mayrand, créateur de sites web, à destination d'une entreprise
 locale qui n'a pas répondu à son premier mail (fourni ci-dessous) il y a environ une semaine.
 Règles strictes :
-- 2 à 4 phrases, vouvoiement, ton jovial et léger avec une pointe d'humour bienveillant, jamais insistant ni culpabilisant.
+- 2 à 4 phrases, vouvoiement, ton jovial et léger avec une pointe d'humour bienveillant, jamais insistant, culpabilisant ni moqueur.
 - Commence par "Bonjour" suivi du prénom du dirigeant s'il est fourni, sinon "Bonjour,".
 - Ne répète pas le premier mail : rappelle simplement la maquette gratuite et sans engagement, avec un petit élément nouveau
   (une question simple, ou l'idée qu'un site se consulte surtout sur téléphone).
@@ -81,14 +82,14 @@ def facebook_message(c):
     metier, commune = c.get("metier") or "votre activité", c.get("commune") or "dans le coin"
     issues = (c.get("site_issues") or "").split(";")[0].strip()
     if c.get("site_status") == "outdated" and issues:
-        constat = f"J'ai jeté un œil à votre site, et petit détail : {issues}."
-        lead = "les clients qui vous cherchent depuis leur téléphone méritent mieux"
+        constat = f"En regardant votre site, j'ai remarqué un point qui pourrait être amélioré : {issues}."
+        lead = "un site à jour aide les clients qui vous cherchent depuis leur téléphone à vous choisir"
     else:
         constat = f"En cherchant « {metier} {commune} », j'ai trouvé votre page Facebook… mais pas de site internet."
         lead = "tout le monde ne pense pas à fouiller Facebook pour trouver un pro"
     variants = [
-        f"{salut}\n\nCorentin, créateur de sites internet en Aveyron (zdrdev.fr). {constat} Dommage, car {lead}, "
-        f"et c'est souvent sur Google que tout se joue.\n\nJe vous propose de vous préparer une maquette "
+        f"{salut}\n\nCorentin, créateur de sites internet en Aveyron (zdrdev.fr). {constat} Or {lead}, "
+        f"et c'est souvent sur Google que tout commence.\n\nJe vous propose de vous préparer une maquette "
         f"gratuite de votre site, sans engagement : ça vous dirait d'y jeter un œil ?\n\nEt si ce n'est pas le moment, "
         f"un simple « non merci » suffit, promis je ne reviendrai pas frapper à la porte 😊",
         f"{salut}\n\nPetit message d'un voisin du web : je m'appelle Corentin et je crée des sites pour les pros du coin "

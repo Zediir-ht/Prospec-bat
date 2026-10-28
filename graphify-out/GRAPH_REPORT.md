@@ -1,17 +1,17 @@
 # Graph Report - Prospec-bat  (2026-10-28)
 
 ## Corpus Check
-- 31 files · ~23,333 words
+- 31 files · ~23,324 words
 - Verdict: corpus is large enough that graph structure adds value.
 - Unclassified: 3 file(s) not represented in the graph (top: (none) 2, .example 1)
 
 ## Summary
-- 468 nodes · 1112 edges · 14 communities (13 shown, 1 thin omitted)
+- 468 nodes · 1111 edges · 14 communities (13 shown, 1 thin omitted)
 - Extraction: 95% EXTRACTED · 5% INFERRED · 0% AMBIGUOUS · INFERRED: 58 edges (avg confidence: 0.86)
 - Token cost: 0 input · 0 output
 
 ## Graph Freshness
-- Built from commit: `20546303`
+- Built from commit: `14f73a4d`
 - Run `git rev-parse HEAD` and compare to check if the graph is stale.
 - Run `graphify update .` after code changes (no API cost).
 
@@ -33,7 +33,7 @@
 
 ## God Nodes (most connected - your core abstractions)
 1. `connect()` - 42 edges
-2. `env()` - 27 edges
+2. `env()` - 26 edges
 3. `process()` - 21 edges
 4. `index()` - 20 edges
 5. `send_now()` - 16 edges
@@ -118,7 +118,7 @@ Cohesion: 0.38
 Nodes (3): Bati, la mascotte robot (icône 192 px), Bati, la mascotte robot (icône 512 px), Interface : barre d'onglets, cartes balayables, effets
 
 ## Knowledge Gaps
-- **8 isolated node(s):** `PATH`, `Suivi des prospects (de la réponse au client)`, `flask (>=3.0)`, `gunicorn (>=22)`, `dnspython (>=2.4)` (+3 more)
+- **8 isolated node(s):** `PATH`, `Suivi des prospects (de la réponse au client)`, `flask (>=3.0)`, `gunicorn (>=22)`, `requests (>=2.31)` (+3 more)
   These have ≤1 connection - possible missing edges or undocumented components. (Counts symbols only; 137 node(s) total have ≤1 connection when file, concept and rationale nodes are included.)
 - **1 thin communities (<3 nodes) omitted from report** — run `graphify query` to explore isolated nodes.
 
@@ -130,9 +130,9 @@ _Questions this graph is uniquely positioned to answer:_
 - **What connects `PATH`, `Suivi des prospects (de la réponse au client)`, `flask (>=3.0)` to the rest of the system?**
   _8 weakly-connected nodes found - possible documentation gaps or missing edges._
 - **Should `Dashboard web (Flask)` be split into smaller, more focused modules?**
-  _Cohesion score 0.052947052947052944 - nodes in this community are weakly interconnected._
+  _Cohesion score 0.052614052614052616 - nodes in this community are weakly interconnected._
 - **Why does `env()` connect `Dashboard web (Flask)` to `Vérification du domaine (DNS)`, `Commandes en ligne et orchestration`, `Rédaction des mails et configuration`, `Lecture des réponses Gmail`, `Envoi et relances`, `Base de données et tests du dashboard`, `discovery.py`, `Installation et démarrage Termux`?**
-  _High betweenness centrality (0.043) - this node is a cross-community bridge._
+  _High betweenness centrality (0.041) - this node is a cross-community bridge._
 - **Should `Vérification du domaine (DNS)` be split into smaller, more focused modules?**
   _Cohesion score 0.059907834101382486 - nodes in this community are weakly interconnected._
 - **Should `Commandes en ligne et orchestration` be split into smaller, more focused modules?**

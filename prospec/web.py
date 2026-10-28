@@ -527,21 +527,20 @@ def collect_auto(con):
 
 def start_collect_loop():
     """Collecte permanente : tant que le dashboard tourne et qu'elle est activée, relance la recherche
-    d'adresses dès que rien d'autre ne tourne. Quand il n'y a plus d'entreprise à tester, attend
-    COLLECT_PAUSE_MINUTES (30 par défaut) avant de récupérer les nouvelles entreprises."""
-    pause = int(config.env("COLLECT_PAUSE_MINUTES", "30")) * 60
+    d'adresses aussitôt, dès que rien d'autre ne tourne. Seule exception : 10 s après une erreur
+    (réseau coupé), pour ne pas tourner à vide."""
 
     def loop():
-        time.sleep(60)
+        time.sleep(10)
         while True:
-            wait = 60
+            wait = 5  # collecte désactivée ou autre tâche en cours : on revérifie dans 5 s
             try:
                 if collect_auto(db.connect()) and not _job["running"]:
                     _job.update(running=True, stop=False, kind="collect")
-                    if not _run_collect() and _job["kind"] == "collect":
-                        wait = pause  # rien à tester (ou erreur réseau) : on patiente
+                    wait = 0 if _run_collect() is not None else 10
             except Exception as exc:
                 print(f"Collecte permanente : {exc}")
+                wait = 10
             time.sleep(wait)
 
     threading.Thread(target=loop, daemon=True).start()

@@ -202,3 +202,23 @@ def test_list_pages(client):
     assert "Intéressé" in client.get("/?tab=replies").get_data(as_text=True)
     refused = client.get("/?tab=refused").get_data(as_text=True)
     assert "LEROY" in refused and "DURAND" not in refused
+
+
+def test_collect_auto_toggle_and_daily_preempts(client, monkeypatch):
+    login(client)
+    assert "Collecte permanente activée" in client.get("/").get_data(as_text=True)
+    client.post("/collect/auto")
+    assert web.collect_auto(db.connect(db.DB_PATH)) is False
+    client.post("/collect/auto")
+    assert web.collect_auto(db.connect(db.DB_PATH)) is True
+    # une collecte en cours cède la place aux mails du jour
+    started = []
+    monkeypatch.setattr(web.threading, "Thread", lambda target, daemon: type("T", (), {"start": lambda s: started.append(target)})())
+    web._job.update(running=True, kind="collect", stop=False, next=None)
+    try:
+        assert web.start_job() is True
+        assert web._job["stop"] and web._job["next"] is web._run_daily and not started
+        client.post("/job/stop")
+        assert web.collect_auto(db.connect(db.DB_PATH)) is False
+    finally:
+        web._job.update(running=False, kind="", stop=False, next=None)

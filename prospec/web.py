@@ -16,7 +16,7 @@ app = Flask(__name__)
 app.secret_key = config.env("DASHBOARD_SECRET") or config.env("DASHBOARD_PASSWORD", "change-me")
 app.config.update(MAX_FORM_MEMORY_SIZE=50_000_000, MAX_CONTENT_LENGTH=None, SESSION_COOKIE_HTTPONLY=True, SESSION_COOKIE_SAMESITE="Lax", PERMANENT_SESSION_LIFETIME=60 * 60 * 24 * 30)
 
-_job = {"running": False, "log": "", "stop": False}
+_job = {"running": False, "log": "", "stop": False, "kind": "", "next": None}
 _send = {"running": False, "log": "", "stop": False}  # envoi groupé, indépendant des recherches
 _clean = {"running": False}
 
@@ -221,7 +221,7 @@ def index():
                  ("à valider", counts.get("drafted", 0), "--yellow2", "drafts"), ("envoyés", counts.get("sent", 0) + counts.get("followed_up", 0), "--blue", "sent"),
                  ("réponses", counts.get("replied", 0), "--green", "replies"), ("refus", counts.get("refused", 0), "--red", "refused")]
         last = db.get_setting(con, "last_clean").split("|")
-        body = render("home.html", clean_last=(frdate(last[0]), last[1]) if len(last) == 2 else None, cleaning=_clean["running"], stats=stats, modes=MODES, mode=db.send_mode(con), running=_job["running"], log=_job["log"],
+        body = render("home.html", clean_last=(frdate(last[0]), last[1]) if len(last) == 2 else None, cleaning=_clean["running"], stats=stats, modes=MODES, mode=db.send_mode(con), running=_job["running"], kind=_job["kind"], auto=collect_auto(con), log=_job["log"],
                       limit=cli.target(), today=sent_today(con))
     return page(body, tab, con)
 
@@ -499,18 +499,52 @@ def _run_collect():
         _job["log"] = "Collecte en cours…"
         tested, found = cli.cmd_collect(con, A, stop=lambda: _job["stop"], log=lambda t: _job.update(log=f"Collecte : {t}"))
         _job["log"] = f"Collecte terminée : {tested} entreprises testées, {found} adresses trouvées."
+        return tested
     except Exception as exc:
         _job["log"] = f"Erreur : {exc}"
     finally:
         _job["running"] = False
+        queued, _job["next"] = _job["next"], None
+        if queued:  # « Préparer les mails du jour » demandé pendant la collecte : il passe maintenant
+            start_job(queued)
 
 
 def start_job(target=None):
+    target = target or _run_daily
     if _job["running"]:
+        if _job["kind"] == "collect" and target is _run_daily:  # la collecte cède la place aux mails du jour
+            _job.update(stop=True, next=_run_daily, log="Collecte en pause : préparation des mails du jour…")
+            return True
         return False
-    _job.update(running=True, stop=False)
-    threading.Thread(target=target or _run_daily, daemon=True).start()
+    _job.update(running=True, stop=False, kind="collect" if target is _run_collect else "daily")
+    threading.Thread(target=target, daemon=True).start()
     return True
+
+
+def collect_auto(con):
+    return db.get_setting(con, "collect_auto", "1") == "1"
+
+
+def start_collect_loop():
+    """Collecte permanente : tant que le dashboard tourne et qu'elle est activée, relance la recherche
+    d'adresses dès que rien d'autre ne tourne. Quand il n'y a plus d'entreprise à tester, attend
+    COLLECT_PAUSE_MINUTES (30 par défaut) avant de récupérer les nouvelles entreprises."""
+    pause = int(config.env("COLLECT_PAUSE_MINUTES", "30")) * 60
+
+    def loop():
+        time.sleep(60)
+        while True:
+            wait = 60
+            try:
+                if collect_auto(db.connect()) and not _job["running"]:
+                    _job.update(running=True, stop=False, kind="collect")
+                    if not _run_collect() and _job["kind"] == "collect":
+                        wait = pause  # rien à tester (ou erreur réseau) : on patiente
+            except Exception as exc:
+                print(f"Collecte permanente : {exc}")
+            time.sleep(wait)
+
+    threading.Thread(target=loop, daemon=True).start()
 
 
 @app.post("/collect")
@@ -519,9 +553,22 @@ def collect_now():
     return redirect(url_for("index"))
 
 
+@app.post("/collect/auto")
+def toggle_collect():
+    con = connect()
+    on = not collect_auto(con)
+    db.set_setting(con, "collect_auto", "1" if on else "0")
+    session["msg"] = "Collecte permanente activée." if on else "Collecte permanente désactivée."
+    if not on and _job["kind"] == "collect":
+        _job["stop"] = True
+    return redirect(url_for("index"))
+
+
 @app.post("/job/stop")
 def stop_job():
     _job["stop"] = True
+    if _job["kind"] == "collect":  # arrêter la collecte coupe aussi la collecte permanente
+        db.set_setting(connect(), "collect_auto", "0")
     _job["log"] = "Arrêt demandé : fin après l'entreprise en cours…"
     return redirect(url_for("index"))
 
@@ -569,4 +616,5 @@ def start_cleanup_once():
 if __name__ == "__main__":
     start_cleanup_once()
     start_inbox_poll()
+    start_collect_loop()
     app.run(host="0.0.0.0", port=int(config.env("PORT", "8000")))

@@ -337,7 +337,7 @@ LOGIN = r"""<div class="block" style="margin-top:12px"><h2>Appuyez sur Start</h2
 {% if err %}<p style="color:var(--red2);font-weight:700;margin-top:8px">Mot de passe incorrect</p>{% endif %}<div class="row"><button class="ok">▶ Start</button></div></form></div>"""
 
 HOME = r"""<div class="block hero" style="--c:var(--red)"{% if running %} data-live="job"{% endif %}><h2>Mails du jour</h2>
-<form method="post" action="{{url_for('run_now')}}"><button class="big" {{'disabled' if running}}>{{'⏳ En cours…' if running else '▶ Préparer les mails du jour'}}</button></form>
+<form method="post" action="{{url_for('run_now')}}"><button class="big" {{'disabled' if running and kind != 'collect'}}>{{'⏳ En cours…' if running and kind != 'collect' else '▶ Préparer les mails du jour'}}</button></form>
 {% if running %}<div class="runner" aria-hidden="true"><i class="bot"></i></div>
 <form method="post" action="{{url_for('stop_job')}}"><div class="row"><button class="ko small">■ Arrêter</button></div></form>{% endif %}
 <p class="log" data-log{% if not log %} hidden{% endif %}>{{log}}</p></div>
@@ -345,8 +345,10 @@ HOME = r"""<div class="block hero" style="--c:var(--red)"{% if running %} data-l
 <div class="block quest" style="--n:{{limit}};--c:var(--yellow)"><h2>Objectif du jour</h2>
 <p><b>{{today}}</b> mail{{'s' if today > 1}} envoyé{{'s' if today > 1}} aujourd'hui · objectif {{limit}}</p>
 <div class="bar">{% for i in range(limit) %}<i class="{{'on' if i < today}}" style="animation-delay:{{i*60}}ms"></i>{% endfor %}</div></div>
-<div class="block" style="--c:var(--green)"><h2>Mode collecte</h2><p class="mut">Teste un grand nombre d'entreprises pour remplir le stock d'adresses. Ça peut durer des heures : laissez le téléphone branché.</p>
-<div class="row">{% if running %}<span class="mut">Une recherche est déjà en cours.</span>{% else %}<form method="post" action="{{url_for('collect_now')}}"><button class="ok">★ Lancer la collecte</button></form>{% endif %}</div></div>
+<div class="block" style="--c:var(--green)"><h2>Mode collecte</h2><p class="mut">Cherche des adresses en continu tant que le serveur tourne, pour remplir le stock. Elle laisse passer « Préparer les mails du jour ». Laissez le téléphone branché.</p>
+<p style="margin-top:8px"><span class="tag {{'good' if auto}}">{{'● Collecte permanente activée' if auto else '○ Collecte permanente désactivée'}}</span>{% if running and kind == 'collect' %}<span class="tag warm">en cours</span>{% endif %}</p>
+<div class="row"><form method="post" action="{{url_for('toggle_collect')}}"><button class="{{'gh' if auto else 'ok'}} small">{{'■ Désactiver' if auto else '★ Activer la collecte permanente'}}</button></form>
+{% if not running and not auto %}<form method="post" action="{{url_for('collect_now')}}"><button class="gh small">Lancer une collecte</button></form>{% endif %}</div></div>
 <details class="block fold"><summary><span>Réglages <span class="mut" style="font-size:14px">· mode {{modes|selectattr(0,"equalto",mode)|map(attribute=1)|first}}</span></span> {{icon('chevron')|safe}}</summary>
 <form method="post" action="{{url_for('set_mode')}}"><label class="mut" for="mode">Mode d'envoi. En mode Review, aucun mail ne part sans votre bouton Envoyer.</label>
 <select name="mode" id="mode" onchange="this.form.submit()" style="margin-top:8px">

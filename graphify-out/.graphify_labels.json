@@ -1,0 +1,17 @@
+{
+  "0": "Dashboard web (Flask)",
+  "1": "Vérification du domaine (DNS)",
+  "2": "Commandes en ligne et orchestration",
+  "3": "Rédaction des mails et configuration",
+  "4": "Lecture des réponses Gmail",
+  "5": "Envoi et relances",
+  "6": "Base de données et tests du dashboard",
+  "7": "Recherche et validation des adresses",
+  "8": "Règles : adresses sourcées et cadre légal",
+  "9": "Installation et démarrage Termux",
+  "10": "Consignes de session (CLAUDE.md)",
+  "11": "Sourcing SIRENE et notifications",
+  "12": "Démarrage de session (hook)",
+  "13": "Statistiques de réponse",
+  "15": "Interface et mascotte Bati"
+}

@@ -181,16 +181,43 @@ def prompt_parts(companies):
     return BATCH_INTRO, [describe(c) for c in companies]
 
 
+def _objects(text):
+    """Objets JSON complets contenant un « siren », lus un par un : sert quand le tableau est coupé, sans crochets
+    ou mal copié, pour ne pas perdre les mails entiers."""
+    decoder, items, i = json.JSONDecoder(), [], 0
+    while True:
+        j = text.find("{", i)
+        if j < 0:
+            return items
+        try:
+            obj, end = decoder.raw_decode(text, j)
+        except json.JSONDecodeError:
+            i = j + 1
+            continue
+        if isinstance(obj, dict) and "siren" in obj:
+            items.append(obj)
+            i = end
+        else:
+            i = j + 1
+
+
 def parse_batch(text, allowed, min_len=80):
-    """Lit la réponse de Claude. Retourne (mails valides {siren: (objet, corps)}, liste d'erreurs)."""
+    """Lit la réponse de Claude. Retourne (mails valides {siren: (objet, corps)}, liste d'erreurs).
+    Tolère un tableau coupé, sans crochets ou copié avec des guillemets typographiques : les mails complets sont lus."""
+    items, notes = None, []
     m = re.search(r"\[.*\]", text, re.S)
-    if not m:
-        return {}, ["aucun tableau JSON trouvé dans la réponse"]
-    try:
-        items = json.loads(m.group(0))
-    except json.JSONDecodeError as exc:
-        return {}, [f"JSON invalide : {exc}"]
-    ok, errors = {}, []
+    if m:
+        try:
+            items = json.loads(m.group(0))
+        except json.JSONDecodeError:
+            pass
+    if items is None:
+        straight = text.replace("\u201c", '"').replace("\u201d", '"')  # guillemets typographiques ajoutés à la copie
+        items = _objects(straight)
+        if not items:
+            return {}, ["aucun tableau JSON trouvé dans la réponse" if not m else "JSON invalide : réponse illisible"]
+        notes.append(f"réponse incomplète ou sans crochets : seuls les {len(items)} mails complets ont été lus")
+    ok, errors = {}, notes
     for it in items if isinstance(items, list) else []:
         siren = str(it.get("siren", "")) if isinstance(it, dict) else ""
         if siren not in allowed:

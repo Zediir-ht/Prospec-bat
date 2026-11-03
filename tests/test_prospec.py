@@ -474,3 +474,19 @@ def test_ei_free_mail_setting(tmp_path, monkeypatch):
     assert sorted(r["siren"] for r in cli.next_to_write(con)) == ["1", "2"]
     monkeypatch.setenv("EI_FREE_MAIL", "0")  # retour en arrière : plus proposé ni envoyable
     assert [r["siren"] for r in cli.next_to_write(con)] == ["2"]
+
+
+def test_parse_batch_tolerates_truncated_or_bracketless_text():
+    allowed = {"1": "A", "2": "B", "3": "C"}
+    body = "Bonjour,\\n\\n" + "Un texte assez long pour passer le contrôle de longueur. " * 3
+    one = lambda s: '{"siren": "%s", "subject": "Objet", "body": "%s"}' % (s, body)
+    ok, errs = mailer.parse_batch("[" + one("1") + ",\n" + one("2") + "]", allowed)
+    assert sorted(ok) == ["1", "2"] and errs == []
+    ok, errs = mailer.parse_batch("[" + one("1") + ",\n" + one("2") + ',\n{"siren": "3", "subject": "Ob', allowed)  # coupé
+    assert sorted(ok) == ["1", "2"] and "incomplète" in errs[0]
+    ok, errs = mailer.parse_batch(one("1") + ",\n" + one("2"), allowed)  # sans crochets
+    assert sorted(ok) == ["1", "2"]
+    curly = ("[" + one("3") + "]").replace('"', "”")
+    ok, _ = mailer.parse_batch(curly, allowed)
+    assert list(ok) == ["3"]
+    assert mailer.parse_batch("rien du tout", allowed) == ({}, ["aucun tableau JSON trouvé dans la réponse"])

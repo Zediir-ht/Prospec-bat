@@ -662,6 +662,7 @@ def start_cleanup_once():
 
 
 if __name__ == "__main__":
+    cli.reopen_ei(db.connect())
     start_cleanup_once()
     start_inbox_poll()
     start_collect_loop()

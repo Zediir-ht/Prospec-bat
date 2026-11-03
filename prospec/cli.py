@@ -63,8 +63,8 @@ def apply_result(con, row, res):
         status = "skip"  # site correct : hors cible
     elif res["site_status"] == "unknown":
         return None  # recherche impossible pour l'instant : réessayé plus tard
-    elif res["email"] and row["nature_juridique"] == "1000" and res["email"].split("@")[-1] in config.FREE_MAIL_DOMAINS:
-        status = "skip"  # entrepreneur individuel : pas de prospection sur une messagerie personnelle
+    elif res["email"] and config.ei_blocked({"email": res["email"], "nature_juridique": row["nature_juridique"]}):
+        status = "skip"  # entrepreneur individuel : pas de prospection sur une messagerie personnelle (EI_FREE_MAIL=1 pour l'autoriser)
     elif res["email"]:
         status = "qualified"
     else:
@@ -137,6 +137,7 @@ def cmd_collect(con, args, stop=None, log=None):
     """Mode collecte : remplit le stock d'adresses sans s'arrêter à DAILY_LIMIT, jusqu'à args.n entreprises
     testées. Télécharge de nouvelles entreprises au fur et à mesure. Les envois restent limités à 10/jour."""
     tested = found = 0
+    reopen_ei(con)
     while tested < args.n and not (stop and stop()):
         sourcing.source(con, min_pool=300)
         try:
@@ -165,6 +166,8 @@ def check_can_send(con, row, subject, body):
     if not ok:
         raise ValueError(f"adresse invalide ({row['email']} : {why})")
     mailer.assert_sourced(row)
+    if config.ei_blocked(row):
+        raise ValueError(f"{row['email']} : entrepreneur individuel sur une messagerie personnelle (EI_FREE_MAIL=0)")
     if not dnscheck.email_ok(row["email"]):
         raise ValueError(f"{row['email']} : le domaine ne reçoit pas de courrier")
 
@@ -222,11 +225,28 @@ def next_to_write(con):
         "ORDER BY (code_postal LIKE '12%') DESC, (site_status='none') DESC, siren"
     ).fetchall()
     supp = db.suppressed_set(con)
-    return [r for r in rows if not db.in_suppressed(r["email"], supp)]
+    return [r for r in rows if not db.in_suppressed(r["email"], supp) and not config.ei_blocked(r)]
+
+
+def reopen_ei(con):
+    """Avec EI_FREE_MAIL=1, remet à rédiger les entrepreneurs individuels écartés jusque-là pour leur adresse
+    personnelle. Retourne leur nombre."""
+    if config.env("EI_FREE_MAIL", "0") != "1":
+        return 0
+    rows = con.execute(
+        "SELECT siren, email, nature_juridique FROM companies WHERE status='skip' AND nature_juridique='1000' "
+        "AND email IS NOT NULL AND email_source IN ('site','osm') AND subject IS NULL AND COALESCE(site_status,'') != 'ok'"
+    ).fetchall()
+    free = [r["siren"] for r in rows if r["email"].rsplit("@", 1)[-1].lower() in config.FREE_MAIL_DOMAINS]
+    for siren in free:
+        con.execute("UPDATE companies SET status='qualified' WHERE siren=?", (siren,))
+    con.commit()
+    return len(free)
 
 
 def cmd_run(con, args):
     mode, limit = db.send_mode(con), int(config.env("DAILY_LIMIT", "10"))
+    reopen_ei(con)
     if mode != "review" and not config.env("GMAIL_APP_PASSWORD"):
         sys.exit("GMAIL_APP_PASSWORD manquant dans .env")
     done = 0

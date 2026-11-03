@@ -111,3 +111,11 @@ def sender():
         "tel": env("SENDER_PHONE"),
         "legal": env("SENDER_LEGAL"),
     }
+
+
+def ei_blocked(row):
+    """Entrepreneur individuel (forme juridique 1000) sur une messagerie personnelle (Gmail, Orange…) :
+    non contacté, sauf si EI_FREE_MAIL=1."""
+    if env("EI_FREE_MAIL", "0") == "1" or not row["email"]:
+        return False
+    return row["nature_juridique"] == "1000" and row["email"].rsplit("@", 1)[-1].lower() in FREE_MAIL_DOMAINS

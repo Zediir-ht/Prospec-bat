@@ -453,3 +453,24 @@ def test_facebook_message_tone():
     assert msg.startswith("Bonjour Marie,") and "maquette gratuite" in msg and "€" not in msg and "prix" not in msg
     assert mailer.messenger_link("https://www.facebook.com/chezlulu12") == "https://m.me/chezlulu12"
     assert "joyeux" in mailer.SYSTEM and "moqueur" in mailer.SYSTEM and "Ne jamais en inventer" in mailer.SYSTEM
+
+
+def test_ei_free_mail_setting(tmp_path, monkeypatch):
+    from prospec import cli
+    con = db.connect(tmp_path / "t.db")
+    con.execute("INSERT INTO companies(siren,nom,commune,email,email_source,nature_juridique,site_status,status) "
+                "VALUES('1','DUPONT','Rodez','dupont@gmail.com','site','1000','none','skip')")
+    con.execute("INSERT INTO companies(siren,nom,commune,email,email_source,nature_juridique,site_status,status) "
+                "VALUES('2','MARTIN','Rodez','contact@martin-plomberie.fr','site','1000','none','qualified')")
+    con.commit()
+    row = con.execute("SELECT * FROM companies WHERE siren='1'").fetchone()
+    monkeypatch.delenv("EI_FREE_MAIL", raising=False)
+    assert config.ei_blocked(row) is True and cli.reopen_ei(con) == 0
+    assert [r["siren"] for r in cli.next_to_write(con)] == ["2"]  # domaine à son nom : toujours contacté
+    with pytest.raises(ValueError, match="entrepreneur individuel"):
+        cli.check_can_send(con, row, "Objet", "Corps")
+    monkeypatch.setenv("EI_FREE_MAIL", "1")
+    assert config.ei_blocked(row) is False and cli.reopen_ei(con) == 1
+    assert sorted(r["siren"] for r in cli.next_to_write(con)) == ["1", "2"]
+    monkeypatch.setenv("EI_FREE_MAIL", "0")  # retour en arrière : plus proposé ni envoyable
+    assert [r["siren"] for r in cli.next_to_write(con)] == ["2"]

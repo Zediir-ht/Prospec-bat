@@ -277,3 +277,21 @@ def test_copied_requests_leave_the_queue_until_imported(client):
     client.post("/write/copied", json={"sirens": ["102", "103"]})
     client.post("/write/reset")
     assert "2 entreprises prêtes" in client.get("/?tab=write").get_data(as_text=True)
+
+
+def test_ready_mails_already_sent_are_removed(client):
+    login(client)
+    con = db.connect(db.DB_PATH)
+    def add(siren, email, status):
+        con.execute("INSERT INTO companies(siren,nom,commune,email,email_source,status,subject,body,contacted_at) "
+                    "VALUES(?,?,?,?,?,?,?,?,?)", (siren, f"E{siren}", "Rodez", email, "site", status, "Objet", "Corps", f"2026-01-0{siren}"))
+    add("2", "autre@famille-x.fr", "sent")       # parti hier
+    add("3", "autre@famille-x.fr", "drafted")    # même adresse, prêt à partir : retiré
+    add("4", "a@societe-y.fr", "drafted")        # envoyé mais statut resté « prêt » : remis en envoyé
+    add("5", "a@societe-z.fr", "drafted")        # normal : reste
+    con.execute("INSERT INTO send_log(ts, siren, kind) VALUES ('2026-01-04T09:00:00', '4', 'first')")
+    con.commit()
+    html = client.get("/?tab=drafts").get_data(as_text=True)
+    assert "E5" in html and "E3" not in html and "E4" not in html
+    st = {r[0]: r[1] for r in db.connect(db.DB_PATH).execute("SELECT siren, status FROM companies")}
+    assert (st["3"], st["4"], st["5"]) == ("skip", "sent", "drafted")

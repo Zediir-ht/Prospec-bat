@@ -147,6 +147,25 @@ def contacted_emails(con, exclude_siren=None):
         "AND siren != ?", (exclude_siren or "",))}
 
 
+def purge_drafts(con):
+    """Retire des mails prêts ceux qui ne doivent plus partir : entreprise déjà envoyée (son envoi est dans l'historique)
+    ou adresse déjà contactée par ailleurs / présente deux fois. Retourne le nombre de mails retirés."""
+    sent = {r[0] for r in con.execute("SELECT siren FROM send_log WHERE kind='first'")}
+    contacted, seen, removed = contacted_emails(con), set(), 0
+    for r in con.execute("SELECT siren, email FROM companies WHERE status='drafted' ORDER BY contacted_at").fetchall():
+        email = (r["email"] or "").lower()
+        if r["siren"] in sent:  # déjà parti : le statut n'avait pas suivi
+            con.execute("UPDATE companies SET status='sent' WHERE siren=?", (r["siren"],))
+        elif email in contacted or email in seen:
+            con.execute("UPDATE companies SET status='skip' WHERE siren=?", (r["siren"],))
+        else:
+            seen.add(email)
+            continue
+        removed += 1
+    con.commit()
+    return removed
+
+
 def log_send(con, siren, kind="first"):
     """Enregistre un envoi réel (premier mail ou relance) : sert au compteur « envoyés aujourd'hui »."""
     con.execute("INSERT INTO send_log(ts, siren, kind) VALUES (?, ?, ?)", (now(), siren, kind))

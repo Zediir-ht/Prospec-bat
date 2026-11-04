@@ -183,6 +183,9 @@ def manifest():
 def index():
     tab = request.args.get("tab", "home")
     con = connect()
+    purged = db.purge_drafts(con)  # mails prêts qui ne doivent plus partir (déjà envoyés)
+    if purged:
+        session["msg"] = f"{purged} mail{'s' if purged > 1 else ''} retiré{'s' if purged > 1 else ''} des mails prêts : déjà envoyé{'s' if purged > 1 else ''}."
     if tab == "drafts":
         total = con.execute("SELECT COUNT(*) FROM companies WHERE status='drafted'").fetchone()[0]
         rows = con.execute("SELECT * FROM companies WHERE status='drafted' ORDER BY contacted_at LIMIT ?", (shown(),)).fetchall()
@@ -400,6 +403,7 @@ def _run_send_all():
     sent, errors = 0, []
     try:
         con = db.connect()
+        db.purge_drafts(con)
         rows = con.execute("SELECT * FROM companies WHERE status='drafted' ORDER BY contacted_at").fetchall()
         if not rows:
             _send["log"] = "Aucun mail prêt à envoyer."

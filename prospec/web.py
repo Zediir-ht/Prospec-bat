@@ -10,7 +10,7 @@ from urllib.parse import quote_plus
 from flask import Flask, abort, g, jsonify, redirect, render_template, request, session, url_for
 from jinja2 import DictLoader
 
-from . import cli, config, db, emails, inbox, mailer, sourcing, stats as statsmod
+from . import cli, config, db, emails, inbox, mailer, quality, sourcing, stats as statsmod
 
 app = Flask(__name__)
 app.secret_key = config.env("DASHBOARD_SECRET") or config.env("DASHBOARD_PASSWORD", "change-me")
@@ -190,7 +190,8 @@ def index():
     elif tab == "write":
         ready = cli.next_to_write(con)
         intro, items = mailer.prompt_parts([dict(r) for r in ready])
-        body = render("write.html", auto=bool(config.env("ANTHROPIC_API_KEY")), n=len(ready), pdata={"intro": intro, "companies": items})
+        body = render("write.html", auto=bool(config.env("ANTHROPIC_API_KEY")), n=len(ready), held=cli.held_back(con),
+                      pdata={"intro": intro, "companies": items})
     elif tab == "followups":
         due = due_followups(con)
         all_rows = [dict(r) for r in due]  # la demande à Claude contient toutes les relances, pas seulement celles affichées
@@ -214,7 +215,8 @@ def index():
             solid = [l for l in lines if l["sent"] >= 5]
             if solid and title != "Origine de l'adresse":
                 insights.append((title, max(solid, key=lambda l: (l["rate"], l["sent"]))))
-        body = render("stats.html", data=data, tiles=tiles, insights=insights)
+        body = render("stats.html", data=data, tiles=tiles, insights=insights, bounces=quality.bounce_table(con),
+                      limit=config.env("BOUNCE_LIMIT", "20"), minimum=config.env("BOUNCE_MIN_SENT", "10"))
     elif tab == "social":
         total = con.execute(f"SELECT COUNT(*) FROM companies WHERE {SOCIAL_TODO}").fetchone()[0]
         rows = [dict(r, message=mailer.facebook_message(dict(r)), messenger=mailer.messenger_link(r["facebook"]))
@@ -268,7 +270,7 @@ def run_cleanup():
         for name, email, why in removed:
             print(f"adresse retirée : {name} <{email}> ({why})")
         db.set_setting(con, "last_clean", f"{db.now()}|{len(removed)}")
-        db.set_setting(con, "emails_cleaned", "3")
+        db.set_setting(con, "emails_cleaned", "4")
     except Exception as exc:
         print(f"Nettoyage impossible : {exc}")
     finally:
@@ -657,7 +659,7 @@ def start_inbox_poll():
 
 def start_cleanup_once():
     """Une fois après chaque mise à jour des règles de validation : nettoie les adresses déjà en base."""
-    if db.get_setting(db.connect(), "emails_cleaned") != "3":
+    if db.get_setting(db.connect(), "emails_cleaned") != "4":
         threading.Thread(target=run_cleanup, daemon=True).start()
 
 

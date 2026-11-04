@@ -396,6 +396,7 @@ DRAFT = r"""{% if sending or send_log %}<div class="block" style="--c:var(--gree
 WRITE = r"""{% if auto %}<div class="block"><h2>Rédaction automatique</h2><p class="mut">Claude écrit chaque mail via la clé API quand vous appuyez sur « Préparer les mails du jour ».</p></div>
 {% else %}<div class="block"><h2>{{n}} entreprise{{'s' if n > 1}} prête{{'s' if n > 1}}</h2>
 <p class="mut">1. Copiez la demande.<br>2. Collez-la dans une conversation avec Claude (claude.ai).<br>3. Collez sa réponse ci-dessous.</p>
+{% if held %}<p class="mut" style="margin-top:8px">{{held}} adresse{{'s' if held > 1}} mise{{'s' if held > 1}} de côté : ce type d'adresse revient trop souvent en erreur (voir Stats).</p>{% endif %}
 {% if n %}<div class="row"><button class="big" type="button" id="copyall">⧉ Copier toutes les demandes ({{n}})</button></div>
 <p class="mut" id="copied" hidden style="margin-top:10px">Copié. Collez-la maintenant dans Claude.</p>
 {% if n > 40 %}<p class="mut" style="margin-top:10px">Au-delà d'environ 40 mails, Claude peut couper sa réponse en route. Dans ce cas, utilisez les lots ci-dessous.</p>{% endif %}{% endif %}</div>
@@ -484,6 +485,10 @@ STATS = r"""<div class="block best" style="--c:var(--green)"><h2>Ce qui marche l
 {% for title, lines in data.groups if lines %}<details class="block fold"{% if loop.first %} open{% endif %}><summary>{{title}} {{icon('chevron')|safe}}</summary>
 {% for l in lines %}<div class="bars"><div class="l"><span>{{l.label}}{% if l.sent < 5 %} <span class="tag few">peu de données</span>{% endif %}</span>
 <span class="mut" style="white-space:nowrap">{{l.replied}}/{{l.sent}} · {{l.rate}} %</span></div><div class="t"><i style="width:{{[l.rate,3]|max}}%"></i></div></div>{% endfor %}</details>{% endfor %}
+{% if bounces %}<details class="block fold"><summary>Adresses en erreur, par type {{icon('chevron')|safe}}</summary>
+<p class="mut">Un type d'adresse qui dépasse {{limit}} % d'erreurs (à partir de {{minimum}} mails) n'est plus proposé à la rédaction.</p>
+{% for label, sent, bad, rate, held in bounces %}<div class="bars"><div class="l"><span>{{label}}{% if held %} <span class="tag hot">mis de côté</span>{% elif sent < 5 %} <span class="tag few">peu de données</span>{% endif %}</span>
+<span class="mut" style="white-space:nowrap">{{bad}}/{{sent}} · {{rate}} %</span></div><div class="t"><i style="width:{{[rate,3]|max}}%;background:var(--red)"></i></div></div>{% endfor %}</details>{% endif %}
 <p class="mut" style="text-align:center">Taux de réponse = réponses / mails reçus. Les adresses en erreur ne comptent pas.</p>"""
 
 

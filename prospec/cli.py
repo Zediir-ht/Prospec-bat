@@ -5,7 +5,7 @@ import sys
 import time
 from concurrent.futures import FIRST_COMPLETED, ThreadPoolExecutor, wait
 
-from . import config, db, discovery, dnscheck, emails, inbox, mailer, osm, qualify, sourcing
+from . import config, db, discovery, dnscheck, emails, inbox, mailer, osm, qualify, quality, sourcing
 
 
 def cmd_source(con, _):
@@ -58,6 +58,9 @@ def apply_result(con, row, res):
             res["email"], res["email_source"] = None, None
     if res["email"] and not dnscheck.email_ok(res["email"]):
         print(f"  ! {res['email']} : le domaine ne reçoit pas de courrier, adresse écartée")
+        res["email"], res["email_source"] = None, None
+    if res["email"] and dnscheck.mailbox_status(res["email"]) == "invalid":
+        print(f"  ! {res['email']} : le serveur dit que cette boîte n'existe pas, adresse écartée")
         res["email"], res["email_source"] = None, None
     if res["site_status"] == "ok":
         status = "skip"  # site correct : hors cible
@@ -170,6 +173,8 @@ def check_can_send(con, row, subject, body):
         raise ValueError(f"{row['email']} : entrepreneur individuel sur une messagerie personnelle (EI_FREE_MAIL=0)")
     if not dnscheck.email_ok(row["email"]):
         raise ValueError(f"{row['email']} : le domaine ne reçoit pas de courrier")
+    if dnscheck.mailbox_status(row["email"]) == "invalid":
+        raise ValueError(f"{row['email']} : adresse introuvable, le serveur du destinataire dit que la boîte n'existe pas")
 
 
 def send_followup_now(con, row, subject, body):
@@ -225,7 +230,18 @@ def next_to_write(con):
         "ORDER BY (code_postal LIKE '12%') DESC, (site_status='none') DESC, siren"
     ).fetchall()
     supp = db.suppressed_set(con)
-    return [r for r in rows if not db.in_suppressed(r["email"], supp) and not config.ei_blocked(r)]
+    risky = quality.risky_classes(con)
+    return [r for r in rows if not db.in_suppressed(r["email"], supp) and not config.ei_blocked(r)
+            and quality.address_class(r) not in risky]
+
+
+def held_back(con):
+    """Adresses qualifiées mais mises de côté : leur type d'adresse revient trop souvent en erreur."""
+    risky = quality.risky_classes(con)
+    if not risky:
+        return 0
+    rows = con.execute("SELECT * FROM companies WHERE status='qualified' AND email IS NOT NULL AND email_source IN ('site','osm')").fetchall()
+    return sum(quality.address_class(r) in risky for r in rows)
 
 
 def reopen_ei(con):

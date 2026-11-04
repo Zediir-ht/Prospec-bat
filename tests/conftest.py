@@ -8,3 +8,4 @@ def isolated(monkeypatch):
     """Tests sans réseau."""
     monkeypatch.setenv("NTFY_TOPIC", "")
     monkeypatch.setattr(dnscheck, "domain_status", lambda domain: "ok")
+    monkeypatch.setattr(dnscheck, "mailbox_status", lambda email: "unknown")

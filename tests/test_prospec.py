@@ -490,3 +490,87 @@ def test_parse_batch_tolerates_truncated_or_bracketless_text():
     ok, _ = mailer.parse_batch(curly, allowed)
     assert list(ok) == ["3"]
     assert mailer.parse_batch("rien du tout", allowed) == ({}, ["aucun tableau JSON trouvé dans la réponse"])
+
+
+class FakeSMTP:
+    """Serveur SMTP simulé : boîtes connues, le reste « inconnu » ; catch.com accepte tout."""
+    log = []
+
+    def __init__(self, timeout=None, local_hostname=None):
+        pass
+
+    def connect(self, host, port):
+        if host == "bloque.test":
+            raise OSError("filtré")
+
+    def ehlo_or_helo_if_needed(self):
+        pass
+
+    def mail(self, sender):
+        return 250, b"ok"
+
+    def rcpt(self, addr):
+        FakeSMTP.log.append(addr)
+        if addr.endswith("@catch.com") or addr == "dupont@ok.fr":
+            return 250, b"ok"
+        if addr.endswith("@spam.fr"):
+            return 550, b"5.7.1 blocked by policy"
+        return 550, b"5.1.1 The email account that you tried to reach does not exist"
+
+    def close(self):
+        pass
+
+
+def test_mailbox_probe(monkeypatch):
+    import smtplib
+    from prospec import dnscheck
+    monkeypatch.undo()  # retire les doubles du conftest (domain_status, mailbox_status)
+    monkeypatch.setattr(smtplib, "SMTP", FakeSMTP)
+    monkeypatch.setattr(dnscheck, "_mx_hosts", lambda domain: [domain])
+    for cache in (dnscheck._mailbox, dnscheck._catchall):
+        cache.clear()
+    dnscheck._probe["blocked_until"] = 0
+    assert dnscheck.mailbox_status("dupont@ok.fr") == "ok"
+    assert dnscheck.mailbox_status("inconnu@ok.fr") == "invalid"
+    assert dnscheck.mailbox_status("x@catch.com") == "unknown"  # le domaine accepte tout : on ne peut pas conclure
+    assert dnscheck.mailbox_status("x@spam.fr") == "unknown"  # refus pour une autre raison qu'une boîte inconnue
+    assert dnscheck.mailbox_status("a@bloque.test") == "unknown" and dnscheck._probe["blocked_until"] > 0  # port 25 filtré
+    assert dnscheck.mailbox_status("b@ok.fr") == "unknown"  # sondes suspendues
+    dnscheck._probe["blocked_until"] = 0
+
+
+def test_unknown_mailbox_blocks_address_and_send(tmp_path, monkeypatch):
+    from prospec import cli, dnscheck
+    con = db.connect(tmp_path / "t.db")
+    con.execute("INSERT INTO companies(siren,nom,commune,status) VALUES('1','A','Rodez','new')")
+    con.commit()
+    monkeypatch.setattr(dnscheck, "mailbox_status", lambda e: "invalid")
+    cli.apply_result(con, con.execute("SELECT * FROM companies").fetchone(),
+                     {"site_url": None, "site_status": "none", "site_issues": "", "email": "mort@dupont-plomberie.fr"})
+    assert con.execute("SELECT status, email FROM companies").fetchone()[:] == ("no_email", None)
+    row = {"siren": "1", "email": "mort@dupont-plomberie.fr", "email_source": "site", "nom": "A", "nature_juridique": "5499"}
+    with pytest.raises(ValueError, match="introuvable"):
+        cli.check_can_send(con, row, "Objet", "Corps")
+
+
+def test_risky_address_types_are_held_back(tmp_path, monkeypatch):
+    from prospec import cli, quality
+    con = db.connect(tmp_path / "t.db")
+    monkeypatch.delenv("ALLOW_RISKY", raising=False)
+
+    def add(i, status, email, src="osm", site="none"):
+        con.execute("INSERT INTO companies(siren,nom,commune,email,email_source,site_status,status,contacted_at) "
+                    "VALUES(?,?,?,?,?,?,?,?)", (str(i), f"E{i}", "Rodez", email, src, site, status,
+                                                 "2026-01-01" if status != "qualified" else None))
+    for i in range(10):  # OSM + messagerie perso + sans site : 4 erreurs sur 10 = 40 %
+        add(i, "bounced" if i < 4 else "sent", f"p{i}@gmail.com")
+    for i in range(10, 20):  # site + domaine propre : aucune erreur
+        add(i, "sent", f"c@entreprise{i}.fr", src="site", site="outdated")
+    add(30, "qualified", "nouveau@gmail.com")  # même type que le premier groupe : mis de côté
+    add(31, "qualified", "bon@entreprise31.fr", src="site", site="outdated")
+    con.commit()
+    table = quality.bounce_table(con)
+    assert table[0][:4] == ("OpenStreetMap · messagerie perso · sans site", 10, 4, 40) and table[0][4] is True
+    assert [r["siren"] for r in cli.next_to_write(con)] == ["31"] and cli.held_back(con) == 1
+    monkeypatch.setenv("ALLOW_RISKY", "1")
+    assert sorted(r["siren"] for r in cli.next_to_write(con)) == ["30", "31"]

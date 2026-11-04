@@ -140,6 +140,8 @@ def diagnose(con, row, check_dns=False, counts=None):
         from . import dnscheck
         if not dnscheck.email_ok(email):
             return "le domaine ne reçoit pas de courrier"
+        if dnscheck.mailbox_status(email) == "invalid":
+            return "la boîte n'existe pas (réponse du serveur du destinataire)"
     return ""
 
 

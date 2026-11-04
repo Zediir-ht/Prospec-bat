@@ -131,3 +131,5 @@ Trois protections contre les mails qui reviennent « adresse introuvable » :
 - **Types d'adresses à risque** : les retours en erreur sont comptés par type (origine de l'adresse · domaine de l'entreprise ou messagerie perso · site sans / ancien / actuel), visibles dans Stats → « Adresses en erreur, par type ». Un type qui dépasse `BOUNCE_LIMIT` % (20) à partir de `BOUNCE_MIN_SENT` mails (10) n'est plus proposé dans Rédiger (« N adresses mises de côté »). `ALLOW_RISKY=1` pour tout garder.
 - **Retours lus automatiquement** : « Vérifier les réponses » (ou la vérification toutes les `INBOX_POLL_MINUTES` minutes) reconnaît les mails revenus en erreur, passe l'entreprise en « adresse en erreur » et ne réécrit jamais à cette adresse.
 Le bouton **Nettoyer les adresses** applique aussi la sonde au stock ; un nettoyage tourne une fois automatiquement après cette mise à jour.
+
+**Diagnostic** : `python -m prospec.cli bounces` indique si la sonde SMTP fonctionne sur votre réseau (port 25), le taux d'erreur par type d'adresse et les dernières adresses en erreur.

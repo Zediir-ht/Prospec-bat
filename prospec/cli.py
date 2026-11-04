@@ -1,4 +1,4 @@
-"""Usage : python -m prospec.cli {source|osm|discover [-n N]|inbox|clean|qualify [--all]|collect [-n N]|run|suppress EMAIL|stats}"""
+"""Usage : python -m prospec.cli {source|osm|discover [-n N]|inbox|clean|qualify [--all]|collect [-n N]|run|suppress EMAIL|stats|bounces}"""
 import argparse
 import random
 import sys
@@ -312,6 +312,27 @@ def cmd_stats(con, _):
         print(f"{r['status']:12} {r['n']}")
 
 
+def cmd_bounces(con, _):
+    """Diagnostic des adresses introuvables : sonde SMTP possible ?, taux d'erreur par type, dernières erreurs."""
+    import socket
+    try:
+        socket.create_connection(("gmail-smtp-in.l.google.com", 25), timeout=6).close()
+        print("Port 25 : accessible -> la sonde SMTP fonctionne")
+        print("  adresse bidon @gmail.com :", dnscheck.mailbox_status("zzqx-test-9f3a71c@gmail.com"), "(attendu : invalid)")
+    except OSError as exc:
+        print(f"Port 25 : bloqué ({exc}) -> la sonde SMTP ne peut rien vérifier sur ce réseau")
+    print("\nTaux d'erreur par type d'adresse (envoyés / en erreur) :")
+    for label, sent, bad, rate, held in quality.bounce_table(con):
+        print(f"  {bad:>3}/{sent:<4} {rate:>3} %  {label}{'  [mis de côté]' if held else ''}")
+    print("\nDernières adresses en erreur :")
+    for r in con.execute("SELECT email, email_source, site_status, site_issues, commune, contacted_at, nature_juridique FROM companies "
+                         "WHERE status='bounced' ORDER BY contacted_at DESC LIMIT 25"):
+        print(f"  {r['email']} | {r['email_source']} | site {r['site_status']} | {r['commune']} | EI={r['nature_juridique'] == '1000'}")
+    left = con.execute("SELECT COUNT(*) FROM companies WHERE status='sent' AND contacted_at < datetime('now','-1 day','localtime')").fetchone()[0]
+    print(f"\nMails envoyés il y a plus d'un jour et jamais confirmés ni en erreur : {left}")
+    print("(si vous avez des erreurs Gmail mais peu d'« adresses en erreur » ci-dessus, la lecture des retours ne les reconnaît pas)")
+
+
 def main():
     p = argparse.ArgumentParser(prog="prospec")
     sub = p.add_subparsers(dest="cmd", required=True)
@@ -326,10 +347,11 @@ def main():
     sub.add_parser("run")
     s = sub.add_parser("suppress"); s.add_argument("email")
     sub.add_parser("stats")
+    sub.add_parser("bounces")
     args = p.parse_args()
     con = db.connect()
     {"source": cmd_source, "osm": cmd_osm, "collect": cmd_collect, "discover": cmd_discover, "inbox": cmd_inbox, "clean": cmd_clean, "qualify": cmd_qualify, "run": cmd_run, "suppress": cmd_suppress,
-     "stats": cmd_stats}[args.cmd](con, args)
+     "stats": cmd_stats, "bounces": cmd_bounces}[args.cmd](con, args)
 
 
 if __name__ == "__main__":

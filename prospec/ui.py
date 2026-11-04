@@ -378,7 +378,8 @@ DRAFT = r"""{% if sending or send_log %}<div class="block" style="--c:var(--gree
 <form method="post" action="{{url_for('stop_send')}}"><div class="row"><button class="ko small">■ Arrêter l'envoi</button></div></form>{% endif %}</div>{% endif %}
 {% if rows and not sending %}<div class="block" style="--c:var(--green)"><h2>{{total}} mails prêts</h2>
 <p class="mut">Envoie les {{total}} mails, avec vos modifications à l'écran, espacés de quelques secondes.</p>
-<form method="post" action="{{url_for('send_all')}}" id="sendall"><div class="row"><button class="big ok" data-confirm="Appuyez encore pour confirmer l'envoi de {{total}} mail(s)">✉ Tout envoyer ({{total}})</button></div></form></div>
+<form method="post" action="{{url_for('send_all')}}" id="sendall"><div class="row"><button class="big ok" data-confirm="Appuyez encore pour confirmer l'envoi de {{total}} mail(s)">✉ Tout envoyer ({{total}})</button></div></form>
+<form method="post" action="{{url_for('clear_drafts')}}"><div class="row"><button class="ko small" data-confirm="Appuyez encore pour vider les {{total}} mails prêts">🗑 Tout vider ({{total}})</button></div></form></div>
 <p class="hint">Touchez un mail pour le modifier. Glissez-le vers la droite pour l'envoyer, vers la gauche pour l'ignorer.</p>""" + SIGNATURE + r"""{% endif %}
 {% for c in rows %}<div class="swipe"><div class="swipe-bg" aria-hidden="true"><span class="go">✉ Envoyer</span><span class="no">Ignorer ✕</span></div>
 <details class="block card" id="c{{c.siren}}"><summary><div class="head"><h2>{{c.enseigne or c.nom}}</h2>{{icon('chevron')|safe}}</div>

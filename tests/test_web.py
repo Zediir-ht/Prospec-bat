@@ -295,3 +295,16 @@ def test_ready_mails_already_sent_are_removed(client):
     assert "E5" in html and "E3" not in html and "E4" not in html
     st = {r[0]: r[1] for r in db.connect(db.DB_PATH).execute("SELECT siren, status FROM companies")}
     assert (st["3"], st["4"], st["5"]) == ("skip", "sent", "drafted")
+
+
+def test_clear_ready_mails(client):
+    login(client)
+    con = db.connect(db.DB_PATH)
+    con.execute("INSERT INTO send_log(ts, siren, kind) VALUES ('2026-01-01T09:00:00', '9', 'first')")
+    con.commit()
+    assert "Tout vider (1)" in client.get("/?tab=drafts").get_data(as_text=True)
+    client.post("/drafts/clear")
+    row = db.connect(db.DB_PATH).execute("SELECT status, subject, body FROM companies WHERE siren='1'").fetchone()
+    assert tuple(row) == ("qualified", None, None)
+    assert "mails prêts" not in client.get("/?tab=drafts").get_data(as_text=True)
+    assert db.connect(db.DB_PATH).execute("SELECT COUNT(*) FROM send_log").fetchone()[0] == 1

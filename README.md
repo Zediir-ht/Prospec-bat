@@ -139,3 +139,6 @@ Quand vous copiez toutes les demandes ou un lot, ces entreprises sont **mises en
 
 ## Jamais deux fois la même adresse
 Une adresse à qui un mail est déjà parti (envoyé, relancé, réponse, refus ou erreur) n'est plus proposée dans Rédiger, même si elle apparaît sous une autre entreprise ; une même adresse n'apparaît qu'une fois dans la liste, et l'envoi est refusé si elle a déjà été contactée par une autre entreprise. Les **mails prêts** (onglet Valider) sont nettoyés de la même façon à chaque ouverture et avant « Tout envoyer » : ceux dont l'entreprise a déjà un envoi dans l'historique, ou dont l'adresse a déjà été contactée, sont retirés (le dashboard l'indique).
+
+## Vider les mails prêts
+Le bouton **🗑 Tout vider** de l'onglet Valider (ou `python -m prospec.cli reset-drafts`) efface tous les mails prêts : les entreprises repartent « à rédiger » sans texte, l'historique des envois reste intact. Les adresses déjà contactées ne reviennent pas dans Rédiger.

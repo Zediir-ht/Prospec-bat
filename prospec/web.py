@@ -323,6 +323,13 @@ def draft_action(siren):
     return redirect(url_for("index", tab="drafts"))
 
 
+@app.post("/drafts/clear")
+def clear_drafts():
+    n = db.reset_drafts(connect())
+    session["msg"] = f"{n} mail{'s' if n > 1 else ''} prêt{'s' if n > 1 else ''} vidé{'s' if n > 1 else ''} : on repart de zéro."
+    return redirect(url_for("index", tab="drafts"))
+
+
 @app.post("/write/copied")
 def write_copied():
     """Les demandes copiées sont mises en attente de la réponse de Claude : elles ne reviennent pas à la copie suivante."""

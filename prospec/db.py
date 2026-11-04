@@ -147,6 +147,14 @@ def contacted_emails(con, exclude_siren=None):
         "AND siren != ?", (exclude_siren or "",))}
 
 
+def reset_drafts(con):
+    """Vide les mails prêts : les entreprises repartent à rédiger (texte effacé). L'historique des envois n'est pas touché."""
+    n = con.execute("UPDATE companies SET status='qualified', subject=NULL, body=NULL, contacted_at=NULL, copied_at=NULL "
+                    "WHERE status='drafted'").rowcount
+    con.commit()
+    return n
+
+
 def purge_drafts(con):
     """Retire des mails prêts ceux qui ne doivent plus partir : entreprise déjà envoyée (son envoi est dans l'historique)
     ou adresse déjà contactée par ailleurs / présente deux fois. Retourne le nombre de mails retirés."""

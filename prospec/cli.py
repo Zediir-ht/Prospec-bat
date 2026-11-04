@@ -343,6 +343,10 @@ def cmd_bounces(con, _):
     print("(si vous avez des erreurs Gmail mais peu d'« adresses en erreur » ci-dessus, la lecture des retours ne les reconnaît pas)")
 
 
+def cmd_reset_drafts(con, _):
+    print(f"{db.reset_drafts(con)} mails prêts vidés (les entreprises repartent à rédiger)")
+
+
 def main():
     p = argparse.ArgumentParser(prog="prospec")
     sub = p.add_subparsers(dest="cmd", required=True)
@@ -358,10 +362,11 @@ def main():
     s = sub.add_parser("suppress"); s.add_argument("email")
     sub.add_parser("stats")
     sub.add_parser("bounces")
+    sub.add_parser("reset-drafts")
     args = p.parse_args()
     con = db.connect()
     {"source": cmd_source, "osm": cmd_osm, "collect": cmd_collect, "discover": cmd_discover, "inbox": cmd_inbox, "clean": cmd_clean, "qualify": cmd_qualify, "run": cmd_run, "suppress": cmd_suppress,
-     "stats": cmd_stats, "bounces": cmd_bounces}[args.cmd](con, args)
+     "stats": cmd_stats, "bounces": cmd_bounces, "reset-drafts": cmd_reset_drafts}[args.cmd](con, args)
 
 
 if __name__ == "__main__":

@@ -147,10 +147,10 @@ def contacted_emails(con, exclude_siren=None):
         "AND siren != ?", (exclude_siren or "",))}
 
 
-def reset_drafts(con):
-    """Vide les mails prêts : les entreprises repartent à rédiger (texte effacé). L'historique des envois n'est pas touché."""
-    n = con.execute("UPDATE companies SET status='qualified', subject=NULL, body=NULL, contacted_at=NULL, copied_at=NULL "
-                    "WHERE status='drafted'").rowcount
+def ignore_drafts(con):
+    """Vide les mails prêts pour de bon : les entreprises sont ignorées (plus jamais proposées), le texte est effacé.
+    L'historique des envois n'est pas touché."""
+    n = con.execute("UPDATE companies SET status='skip', subject=NULL, body=NULL, copied_at=NULL WHERE status='drafted'").rowcount
     con.commit()
     return n
 

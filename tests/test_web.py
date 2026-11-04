@@ -1,6 +1,6 @@
 import pytest
 
-from prospec import config, db, web
+from prospec import cli, config, db, web
 
 
 @pytest.fixture
@@ -297,14 +297,15 @@ def test_ready_mails_already_sent_are_removed(client):
     assert (st["3"], st["4"], st["5"]) == ("skip", "sent", "drafted")
 
 
-def test_clear_ready_mails(client):
+def test_ignore_ready_mails_for_good(client):
     login(client)
     con = db.connect(db.DB_PATH)
     con.execute("INSERT INTO send_log(ts, siren, kind) VALUES ('2026-01-01T09:00:00', '9', 'first')")
     con.commit()
-    assert "Tout vider (1)" in client.get("/?tab=drafts").get_data(as_text=True)
+    assert "Tout ignorer (1)" in client.get("/?tab=drafts").get_data(as_text=True)
     client.post("/drafts/clear")
     row = db.connect(db.DB_PATH).execute("SELECT status, subject, body FROM companies WHERE siren='1'").fetchone()
-    assert tuple(row) == ("qualified", None, None)
+    assert tuple(row) == ("skip", None, None)
     assert "mails prêts" not in client.get("/?tab=drafts").get_data(as_text=True)
     assert db.connect(db.DB_PATH).execute("SELECT COUNT(*) FROM send_log").fetchone()[0] == 1
+    assert [r["siren"] for r in cli.next_to_write(db.connect(db.DB_PATH))] == []

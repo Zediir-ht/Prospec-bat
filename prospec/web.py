@@ -325,8 +325,8 @@ def draft_action(siren):
 
 @app.post("/drafts/clear")
 def clear_drafts():
-    n = db.reset_drafts(connect())
-    session["msg"] = f"{n} mail{'s' if n > 1 else ''} prêt{'s' if n > 1 else ''} vidé{'s' if n > 1 else ''} : on repart de zéro."
+    n = db.ignore_drafts(connect())
+    session["msg"] = f"{n} mail{'s' if n > 1 else ''} prêt{'s' if n > 1 else ''} ignoré{'s' if n > 1 else ''} pour de bon : on repart de zéro."
     return redirect(url_for("index", tab="drafts"))
 
 

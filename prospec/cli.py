@@ -171,6 +171,8 @@ def check_can_send(con, row, subject, body):
     mailer.assert_sourced(row)
     if config.ei_blocked(row):
         raise ValueError(f"{row['email']} : entrepreneur individuel sur une messagerie personnelle (EI_FREE_MAIL=0)")
+    if row["email"].lower() in db.contacted_emails(con, row["siren"]):
+        raise ValueError(f"{row['email']} : un mail est déjà parti à cette adresse (autre entreprise)")
     if not dnscheck.email_ok(row["email"]):
         raise ValueError(f"{row['email']} : le domaine ne reçoit pas de courrier")
     if dnscheck.mailbox_status(row["email"]) == "invalid":
@@ -231,8 +233,16 @@ def next_to_write(con):
     ).fetchall()
     supp = db.suppressed_set(con)
     risky = quality.risky_classes(con)
-    return [r for r in rows if not db.in_suppressed(r["email"], supp) and not config.ei_blocked(r)
-            and quality.address_class(r) not in risky]
+    seen = db.contacted_emails(con)  # jamais deux fois la même adresse, même sous une autre entreprise
+    out = []
+    for r in rows:
+        email = r["email"].lower()
+        if (db.in_suppressed(r["email"], supp) or config.ei_blocked(r) or quality.address_class(r) in risky
+                or email in seen):
+            continue
+        seen.add(email)
+        out.append(r)
+    return out
 
 
 def held_back(con):

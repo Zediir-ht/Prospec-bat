@@ -583,3 +583,22 @@ def test_price_check_only_flags_whole_words():
     for bad in ("à partir de 500 €", "pour 300 euros", "notre tarif", "sans le prix"):
         with pytest.raises(ValueError, match="prix"):
             mailer.check_mail("Objet", ok + bad)
+
+
+def test_never_write_or_send_twice_to_the_same_address(tmp_path):
+    from prospec import cli
+    con = db.connect(tmp_path / "t.db")
+
+    def add(siren, email, status, contacted=None):
+        con.execute("INSERT INTO companies(siren,nom,commune,email,email_source,status,contacted_at) VALUES(?,?,?,?,?,?,?)",
+                    (siren, f"E{siren}", "Rodez", email, "site", status, contacted))
+    add("1", "contact@famille-dupont.fr", "sent", "2026-11-03T10:00:00")  # parti hier
+    add("2", "Contact@Famille-Dupont.fr", "qualified")  # autre société, même adresse : à ne pas écrire
+    add("3", "a@autre-entreprise.fr", "qualified")
+    add("4", "a@autre-entreprise.fr", "qualified")  # doublon dans le stock : une seule fois
+    add("5", "b@troisieme.fr", "qualified")
+    con.commit()
+    assert [r["siren"] for r in cli.next_to_write(con)] == ["3", "5"]
+    row = con.execute("SELECT * FROM companies WHERE siren='2'").fetchone()
+    with pytest.raises(ValueError, match="déjà parti"):
+        cli.check_can_send(con, row, "Objet", "Corps")

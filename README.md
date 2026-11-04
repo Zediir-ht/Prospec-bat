@@ -136,3 +136,6 @@ Le bouton **Nettoyer les adresses** applique aussi la sonde au stock ; un nettoy
 
 ## Demandes copiées
 Quand vous copiez toutes les demandes ou un lot, ces entreprises sont **mises en attente** (`COPY_HOLD_HOURS`, 24 h) : elles ne reviennent pas à la copie suivante, et un encart indique « N demandes déjà copiées, en attente de la réponse de Claude ». Elles quittent définitivement la liste quand vous importez les mails. Celles que l'import refuse (mail trop court, etc.) reviennent tout de suite ; le bouton **↺ Remettre dans la file** les remet toutes. Le contrôle « prix » ne regarde que des mots entiers (€, euro, tarif, prix) : un nom comme « Neuroboosting » n'est plus refusé, ce qui faisait revenir cette entreprise dans chaque lot.
+
+## Jamais deux fois la même adresse
+Une adresse à qui un mail est déjà parti (envoyé, relancé, réponse, refus ou erreur) n'est plus proposée dans Rédiger, même si elle apparaît sous une autre entreprise ; une même adresse n'apparaît qu'une fois dans la liste, et l'envoi est refusé si elle a déjà été contactée par une autre entreprise.

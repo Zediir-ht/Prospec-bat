@@ -137,6 +137,16 @@ def send_mode(con):
     return get_setting(con, "send_mode", env("SEND_MODE", "review"))
 
 
+CONTACTED = ("sent", "followed_up", "replied", "refused", "bounced")
+
+
+def contacted_emails(con, exclude_siren=None):
+    """Adresses (en minuscules) à qui un mail est déjà parti, quelle que soit l'entreprise qui les porte."""
+    return {r[0] for r in con.execute(
+        f"SELECT lower(email) FROM companies WHERE email IS NOT NULL AND contacted_at IS NOT NULL AND status IN {CONTACTED} "
+        "AND siren != ?", (exclude_siren or "",))}
+
+
 def log_send(con, siren, kind="first"):
     """Enregistre un envoi réel (premier mail ou relance) : sert au compteur « envoyés aujourd'hui »."""
     con.execute("INSERT INTO send_log(ts, siren, kind) VALUES (?, ?, ?)", (now(), siren, kind))

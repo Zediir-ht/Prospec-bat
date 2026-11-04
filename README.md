@@ -133,3 +133,6 @@ Trois protections contre les mails qui reviennent « adresse introuvable » :
 Le bouton **Nettoyer les adresses** applique aussi la sonde au stock ; un nettoyage tourne une fois automatiquement après cette mise à jour.
 
 **Diagnostic** : `python -m prospec.cli bounces` indique si la sonde SMTP fonctionne sur votre réseau (port 25), le taux d'erreur par type d'adresse et les dernières adresses en erreur.
+
+## Demandes copiées
+Quand vous copiez toutes les demandes ou un lot, ces entreprises sont **mises en attente** (`COPY_HOLD_HOURS`, 24 h) : elles ne reviennent pas à la copie suivante, et un encart indique « N demandes déjà copiées, en attente de la réponse de Claude ». Elles quittent définitivement la liste quand vous importez les mails. Celles que l'import refuse (mail trop court, etc.) reviennent tout de suite ; le bouton **↺ Remettre dans la file** les remet toutes. Le contrôle « prix » ne regarde que des mots entiers (€, euro, tarif, prix) : un nom comme « Neuroboosting » n'est plus refusé, ce qui faisait revenir cette entreprise dans chaque lot.

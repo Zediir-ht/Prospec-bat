@@ -397,6 +397,8 @@ WRITE = r"""{% if auto %}<div class="block"><h2>Rédaction automatique</h2><p cl
 {% else %}<div class="block"><h2>{{n}} entreprise{{'s' if n > 1}} prête{{'s' if n > 1}}</h2>
 <p class="mut">1. Copiez la demande.<br>2. Collez-la dans une conversation avec Claude (claude.ai).<br>3. Collez sa réponse ci-dessous.</p>
 {% if held %}<p class="mut" style="margin-top:8px">{{held}} adresse{{'s' if held > 1}} mise{{'s' if held > 1}} de côté : ce type d'adresse revient trop souvent en erreur (voir Stats).</p>{% endif %}
+{% if waiting %}<p class="mut" style="margin-top:8px"><b>{{waiting}}</b> demande{{'s' if waiting > 1}} déjà copiée{{'s' if waiting > 1}}, en attente de la réponse de Claude : elle{{'s' if waiting > 1}} ne reviennent pas ici tant que vous n'avez pas importé les mails.</p>
+<form method="post" action="{{url_for('write_reset')}}"><div class="row"><button class="gh small">↺ Remettre les {{waiting}} dans la file</button></div></form>{% endif %}
 {% if n %}<div class="row"><button class="big" type="button" id="copyall">⧉ Copier toutes les demandes ({{n}})</button></div>
 <p class="mut" id="copied" hidden style="margin-top:10px">Copié. Collez-la maintenant dans Claude.</p>
 {% if n > 40 %}<p class="mut" style="margin-top:10px">Au-delà d'environ 40 mails, Claude peut couper sa réponse en route. Dans ce cas, utilisez les lots ci-dessous.</p>{% endif %}{% endif %}</div>
@@ -416,11 +418,12 @@ function copy(text,done){function fallback(){var t=document.createElement("texta
 document.body.appendChild(t);t.select();t.setSelectionRange(0,text.length);var ok=false;try{ok=document.execCommand("copy")}catch(e){}t.remove();done(ok)}
 if(navigator.clipboard&&navigator.clipboard.writeText){navigator.clipboard.writeText(text).then(function(){done(true)},fallback)}else fallback()}
 function say(ok,msg){var c=document.getElementById("copied");if(!c)return;c.hidden=false;c.textContent=ok?msg:"Copie impossible : ouvrez Réglages Chrome > Paramètres du site, ou copiez à la main."}
-var all=document.getElementById("copyall");if(all)all.addEventListener("click",function(){copy(build(0,N),function(ok){say(ok,"Copié : les "+N+" demandes. Collez-les dans Claude.")})});
+function mark(a,b){try{fetch("/write/copied",{method:"POST",headers:{"Content-Type":"application/json"},body:JSON.stringify({sirens:d.companies.slice(a,b).map(function(c){return c.siren})})})}catch(e){}}
+var all=document.getElementById("copyall");if(all)all.addEventListener("click",function(){copy(build(0,N),function(ok){if(ok)mark(0,N);say(ok,"Copié : les "+N+" demandes. Collez-les dans Claude, puis importez sa réponse : elles ne reviendront pas ici.")})});
 var box=document.getElementById("lots"),size=document.getElementById("lotsize");
 function lots(){if(!box)return;var k=parseInt(size.value,10),h="";for(var a=0;a<N;a+=k){var b=Math.min(a+k,N);h+='<button type="button" class="small lot" data-a="'+a+'" data-b="'+b+'">⧉ Lot '+(a/k+1)+' <span style="opacity:.85">· '+(a+1)+(b-a>1?"–"+b:"")+'</span></button>'}box.innerHTML=h}
 if(size){size.addEventListener("change",lots);lots();box.addEventListener("click",function(e){var b=e.target.closest(".lot");if(!b)return;var a=+b.dataset.a,z=+b.dataset.b;
-copy(build(a,z),function(ok){say(ok,"Lot copié ("+(a+1)+" à "+z+"). Collez-le dans Claude.");if(ok){b.classList.add("ok");b.textContent="✓ Copié · "+(a+1)+"–"+z}})})}
+copy(build(a,z),function(ok){if(ok)mark(a,z);say(ok,"Lot copié ("+(a+1)+" à "+z+"). Collez-le dans Claude, puis importez sa réponse : il ne reviendra pas ici.");if(ok){b.classList.add("ok");b.textContent="✓ Copié · "+(a+1)+"–"+z}})})}
 })();
 </script>{% endif %}"""
 

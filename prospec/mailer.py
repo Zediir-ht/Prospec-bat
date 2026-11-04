@@ -137,15 +137,16 @@ def claude_mail(c):
     return check_mail(subject.strip().strip('"'), body.strip())
 
 
-FORBIDDEN = ("€", "euro", "tarif", "prix", "devis gratuit à partir")
+# Mots entiers seulement : « Neuroboosting » ou « Europe » ne sont pas des prix
+FORBIDDEN_RE = re.compile(r"€|\b(?:euros?|tarifs?|prix)\b|devis gratuit à partir", re.I)
 
 
 def check_mail(subject, body, min_len=80):
-    text = f"{subject}\n{body}".lower()
     if not subject or len(body) < min_len:
         raise ValueError("mail vide ou trop court")
-    if any(w in text for w in FORBIDDEN):
-        raise ValueError("le mail mentionne un prix")
+    found = FORBIDDEN_RE.search(f"{subject}\n{body}")
+    if found:
+        raise ValueError(f"le mail mentionne un prix (« {found.group(0)} »)")
     return subject, body
 
 

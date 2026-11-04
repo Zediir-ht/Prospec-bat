@@ -33,7 +33,7 @@ def migrate(con):
     """Crée et met à jour la structure de la base. Une seule fois par processus et par fichier."""
     con.executescript(SCHEMA)
     for col in ("nature_juridique", "email_source", "enseigne", "message_ids", "reply_at", "reply_snippet",
-                "followup_subject", "followup_body", "stage", "notes", "reminder", "facebook", "fb_done", "fb_message", "fb_sent_at"):  # colonnes ajoutées après la 1re version
+                "followup_subject", "followup_body", "stage", "notes", "reminder", "facebook", "fb_done", "fb_message", "fb_sent_at", "copied_at"):  # colonnes ajoutées après la 1re version
         try:
             con.execute(f"ALTER TABLE companies ADD COLUMN {col} TEXT")
         except sqlite3.OperationalError:

@@ -1,7 +1,7 @@
 """Dashboard mobile : valider les mails du jour, voir les stats, gérer les désinscriptions."""
 import hmac
 import re
-from datetime import datetime
+from datetime import datetime, timedelta
 import random
 import threading
 import time
@@ -189,9 +189,11 @@ def index():
         body = render("draft.html", rows=rows, total=total, n=shown(), sending=_send["running"], send_log=_send["log"])
     elif tab == "write":
         ready = cli.next_to_write(con)
-        intro, items = mailer.prompt_parts([dict(r) for r in ready])
-        body = render("write.html", auto=bool(config.env("ANTHROPIC_API_KEY")), n=len(ready), held=cli.held_back(con),
-                      pdata={"intro": intro, "companies": items})
+        cutoff = (datetime.now() - timedelta(hours=float(config.env("COPY_HOLD_HOURS", "24")))).isoformat(timespec="seconds")
+        fresh = [r for r in ready if not r["copied_at"] or r["copied_at"] < cutoff]  # déjà copiées : en attente de l'import
+        intro, items = mailer.prompt_parts([dict(r) for r in fresh])
+        body = render("write.html", auto=bool(config.env("ANTHROPIC_API_KEY")), n=len(fresh), waiting=len(ready) - len(fresh),
+                      held=cli.held_back(con), pdata={"intro": intro, "companies": items})
     elif tab == "followups":
         due = due_followups(con)
         all_rows = [dict(r) for r in due]  # la demande à Claude contient toutes les relances, pas seulement celles affichées
@@ -318,6 +320,25 @@ def draft_action(siren):
     return redirect(url_for("index", tab="drafts"))
 
 
+@app.post("/write/copied")
+def write_copied():
+    """Les demandes copiées sont mises en attente de la réponse de Claude : elles ne reviennent pas à la copie suivante."""
+    sirens = [str(s) for s in (request.get_json(silent=True) or {}).get("sirens", [])][:5000]
+    con = connect()
+    con.executemany("UPDATE companies SET copied_at=? WHERE siren=? AND status='qualified'", [(db.now(), s) for s in sirens])
+    con.commit()
+    return jsonify(marked=len(sirens))
+
+
+@app.post("/write/reset")
+def write_reset():
+    con = connect()
+    n = con.execute("UPDATE companies SET copied_at=NULL WHERE status='qualified' AND copied_at IS NOT NULL").rowcount
+    con.commit()
+    session["msg"] = f"{n} demande{'s' if n > 1 else ''} remise{'s' if n > 1 else ''} dans la file."
+    return redirect(url_for("index", tab="write"))
+
+
 @app.post("/import")
 def import_mails():
     con = connect()
@@ -326,6 +347,9 @@ def import_mails():
     for siren, (subject, body) in ok.items():
         con.execute("UPDATE companies SET status='drafted', subject=?, body=?, contacted_at=? WHERE siren=?",
                     (subject, body, db.now(), siren))
+    text = request.form.get("text", "")
+    back = [s for s in allowed if s in text and s not in ok]  # présentes dans la réponse mais refusées : de nouveau à copier
+    con.executemany("UPDATE companies SET copied_at=NULL WHERE siren=?", [(s,) for s in back])
     con.commit()
     msg = f"{len(ok)} mails importés dans « À valider »."
     if errors:

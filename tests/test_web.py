@@ -254,3 +254,26 @@ def test_social_tab(client):
     assert db.connect(db.DB_PATH).execute("SELECT status FROM companies WHERE siren='5'").fetchone()[0] == "replied"
     for tab in ("pipeline", "replies", "stats", "sent"):
         assert client.get(f"/?tab={tab}").status_code == 200
+
+
+def test_copied_requests_leave_the_queue_until_imported(client):
+    login(client)
+    con = db.connect(db.DB_PATH)
+    for i in (1, 2, 3):
+        con.execute("INSERT INTO companies(siren,nom,commune,metier,email,email_source,status,site_status) "
+                    "VALUES(?,?,?,?,?,?,?,?)", (f"10{i}", f"ENT{i}", "Rodez", "plomberie", f"c@ent{i}-plomberie.fr", "site", "qualified", "none"))
+    con.commit()
+    assert "3 entreprises prêtes" in client.get("/?tab=write").get_data(as_text=True)
+    assert client.post("/write/copied", json={"sirens": ["101", "102"]}).get_json() == {"marked": 2}
+    page = client.get("/?tab=write").get_data(as_text=True)
+    assert "1 entreprise prête" in page and "2</b> demandes déjà copiées" in page and '"siren": "103"' in page
+    assert '"siren": "101"' not in page
+    # réponse importée pour 101 seulement : 102 était dans la réponse mais refusée -> de nouveau à copier
+    good = ('[{"siren": "101", "subject": "Objet", "body": "' + "Bonjour, un mail assez long pour passer le contrôle. " * 3 + '"},'
+            ' {"siren": "102", "subject": "Objet", "body": "court"}]')
+    client.post("/import", data={"text": good})
+    page = client.get("/?tab=write").get_data(as_text=True)
+    assert '"siren": "102"' in page and '"siren": "103"' in page and '"siren": "101"' not in page
+    client.post("/write/copied", json={"sirens": ["102", "103"]})
+    client.post("/write/reset")
+    assert "2 entreprises prêtes" in client.get("/?tab=write").get_data(as_text=True)

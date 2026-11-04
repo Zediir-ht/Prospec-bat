@@ -574,3 +574,12 @@ def test_risky_address_types_are_held_back(tmp_path, monkeypatch):
     assert [r["siren"] for r in cli.next_to_write(con)] == ["31"] and cli.held_back(con) == 1
     monkeypatch.setenv("ALLOW_RISKY", "1")
     assert sorted(r["siren"] for r in cli.next_to_write(con)) == ["30", "31"]
+
+
+def test_price_check_only_flags_whole_words():
+    ok = "Bonjour, un mail assez long pour passer le contrôle de longueur minimale, sans rien de gênant. " * 2
+    for name in ("Neuroboosting", "Europe Auto", "Eurocamp"):
+        assert mailer.check_mail(f"{name}, une maquette gratuite", ok + name)
+    for bad in ("à partir de 500 €", "pour 300 euros", "notre tarif", "sans le prix"):
+        with pytest.raises(ValueError, match="prix"):
+            mailer.check_mail("Objet", ok + bad)
